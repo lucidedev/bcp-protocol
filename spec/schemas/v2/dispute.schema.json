@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bcp-protocol.org/schemas/v0.2/dispute.json",
+  "title": "BCP v0.2 DISPUTE",
+  "type": "object",
+  "required": ["bcp_version", "type", "sessionId", "timestamp", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "bcp_version": { "const": "0.2" },
+    "type": { "const": "dispute" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "reason": { "type": "string", "minLength": 1 },
+    "resolution": { "type": "string", "enum": ["refund", "redeliver", "negotiate"] },
+    "callbackUrl": { "type": "string", "format": "uri" },
+    "signature": { "type": "string" }
+  }
+}

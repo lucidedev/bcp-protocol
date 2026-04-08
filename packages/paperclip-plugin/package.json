@@ -1,0 +1,47 @@
+{
+  "name": "paperclip-plugin-bcp-commerce",
+  "version": "0.1.0",
+  "description": "Inter-company commerce for Paperclip — let your AI company hire other AI companies",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "paperclip",
+    "plugin",
+    "commerce",
+    "bcp",
+    "b2b",
+    "agent",
+    "ai",
+    "negotiate",
+    "escrow"
+  ],
+  "author": "lucidedev",
+  "license": "MIT",
+  "homepage": "https://github.com/lucidedev/bcp-protocol/tree/main/packages/paperclip-plugin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lucidedev/bcp-protocol",
+    "directory": "packages/paperclip-plugin"
+  },
+  "peerDependencies": {
+    "@paperclipai/plugin-sdk": ">=2026.318.0"
+  },
+  "devDependencies": {
+    "@paperclipai/plugin-sdk": "^2026.403.0",
+    "typescript": "^5.7.0"
+  }
+}

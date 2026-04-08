@@ -113,7 +113,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
-const STATES = ["INTENT", "QUOTED", "COUNTERED", "COMMITTED", "FULFILLED"];
+const STATES = ["intent", "quoted", "countered", "committed", "fulfilled"];
 
 function Hero() {
   const [active, setActive] = useState(0);
@@ -134,7 +134,7 @@ function Hero() {
           className="inline-flex items-center gap-2 border border-zinc-200 bg-white rounded-full px-3.5 py-1 text-xs text-zinc-500 mb-8 font-medium shadow-sm"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          Open Source · Apache 2.0 · Built on x402
+          Open Source · Apache 2.0 · v0.2
         </motion.div>
 
         {/* Headline */}
@@ -156,8 +156,8 @@ function Hero() {
           transition={{ duration: 0.6, delay: 0.3 }}
           className="text-lg text-zinc-500 max-w-xl mx-auto mb-10 leading-relaxed"
         >
-          BCP defines how AI agents negotiate, escrow, and settle B2B
-          deals&nbsp;— fully autonomous, cryptographically signed, on-chain.
+          BCP defines how AI agents negotiate and settle B2B
+          deals&nbsp;— lean messages, pluggable settlement, works in minutes.
         </motion.p>
 
         {/* CTAs */}
@@ -252,45 +252,45 @@ interface DemoMessage {
 
 const DEMO_MESSAGES: DemoMessage[] = [
   {
-    type: "INTENT",
+    type: "intent",
     from: "buyer",
     label: "Intent",
-    detail: "1,000 API calls · budget ≤ $25",
+    detail: "Logo design · budget ≤ $500",
     color: "#4D65FF",
   },
   {
-    type: "QUOTE",
+    type: "quote",
     from: "seller",
     label: "Quote",
-    detail: "$22.00 · delivery in 30 min",
+    detail: "$450 · 5 business days",
     color: "#7c8fff",
   },
   {
-    type: "COUNTER",
+    type: "counter",
     from: "buyer",
     label: "Counter",
-    detail: "$18.50 · delivery in 60 min",
+    detail: "$350 · budget is tight",
     color: "#f59e0b",
   },
   {
-    type: "QUOTE",
+    type: "quote",
     from: "seller",
     label: "Revised Quote",
-    detail: "$20.00 · delivery in 45 min",
+    detail: "$400 · 5 business days",
     color: "#7c8fff",
   },
   {
-    type: "COMMIT",
+    type: "commit",
     from: "buyer",
     label: "Commit",
-    detail: "$20.00 USDC locked in escrow",
+    detail: "$400 agreed · settlement: invoice",
     color: "#22c55e",
   },
   {
-    type: "FULFIL",
+    type: "fulfil",
     from: "seller",
     label: "Fulfil",
-    detail: "Delivered · escrow released",
+    detail: "3 logo concepts delivered",
     color: "#10b981",
   },
 ];
@@ -430,7 +430,7 @@ function DemoFlow() {
                 >
                   <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium rounded-full px-4 py-1.5">
                     <CheckCircle2 size={13} />
-                    Deal settled on-chain · $20.00 USDC
+                    Deal complete · $400 settled
                   </div>
                 </motion.div>
               )}
@@ -440,11 +440,11 @@ function DemoFlow() {
 
         {/* Bottom detail */}
         <div className="flex items-center justify-center gap-4 mt-4 text-[11px] text-zinc-400 font-mono">
-          <span>Ed25519 signed</span>
+          <span>6 messages</span>
           <span className="w-1 h-1 rounded-full bg-zinc-300" />
-          <span>Base Sepolia</span>
+          <span>optional auth</span>
           <span className="w-1 h-1 rounded-full bg-zinc-300" />
-          <span>USDC escrow</span>
+          <span>pluggable settlement</span>
         </div>
       </div>
     </Section>
@@ -520,42 +520,42 @@ const messages = [
     name: "INTENT",
     color: "#4D65FF",
     icon: <MessageSquare size={16} />,
-    description: "Buyer declares a procurement need with item, quantity, and budget.",
+    description: "Buyer describes what they need. Just a service description and optional budget.",
     role: "Buyer → Seller",
   },
   {
     name: "QUOTE",
     color: "#7c8fff",
     icon: <FileText size={16} />,
-    description: "Seller responds with a cryptographically signed offer and terms.",
+    description: "Seller responds with price, deliverables, and optional settlement method.",
     role: "Seller → Buyer",
   },
   {
     name: "COUNTER",
     color: "#f59e0b",
     icon: <ArrowLeftRight size={16} />,
-    description: "Either party proposes modified terms — price, quantity, conditions.",
+    description: "Either party proposes a different price with an optional reason.",
     role: "Buyer ↔ Seller",
   },
   {
     name: "COMMIT",
     color: "#22c55e",
     icon: <Shield size={16} />,
-    description: "Buyer accepts; escrow is locked on-chain via x402 payment.",
+    description: "Buyer accepts. Settlement is pluggable — invoice, x402, escrow, or none.",
     role: "Buyer → Chain",
   },
   {
     name: "FULFIL",
     color: "#10b981",
     icon: <CheckCircle2 size={16} />,
-    description: "Seller delivers; escrow releases upon cryptographic proof.",
+    description: "Seller delivers. Optional proof hash and invoice URL.",
     role: "Seller → Chain",
   },
   {
     name: "DISPUTE",
     color: "#ef4444",
     icon: <AlertTriangle size={16} />,
-    description: "Either party freezes escrow and raises an issue for resolution.",
+    description: "Either party flags a problem with a reason and resolution preference.",
     role: "Buyer ↔ Seller",
   },
 ];
@@ -622,10 +622,10 @@ function ArchitectureSection() {
       <div className="text-center mb-14">
         <SectionLabel>Architecture</SectionLabel>
         <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 mb-3">
-          Trustless escrow, built in
+          Pluggable settlement
         </h2>
         <p className="text-zinc-500 max-w-lg mx-auto">
-          BCP layers negotiation and escrow on top of x402 — the payment layer stays untouched.
+          Start with no settlement. Add invoicing, x402 payments, or on-chain escrow when you need it.
         </p>
       </div>
 
@@ -709,16 +709,16 @@ function ArchitectureSection() {
         {/* Key properties */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="border border-zinc-200 rounded-xl p-4 text-center">
-            <div className="text-sm font-semibold text-zinc-900 mb-1">Non-custodial</div>
-            <div className="text-xs text-zinc-500">Funds live in a smart contract, not a third party</div>
+            <div className="text-sm font-semibold text-zinc-900 mb-1">Start simple</div>
+            <div className="text-xs text-zinc-500">No auth, no settlement, no infra required to begin</div>
           </div>
           <div className="border border-zinc-200 rounded-xl p-4 text-center">
-            <div className="text-sm font-semibold text-zinc-900 mb-1">Cryptographically verified</div>
-            <div className="text-xs text-zinc-500">Ed25519 signatures on every message</div>
+            <div className="text-sm font-semibold text-zinc-900 mb-1">Add trust later</div>
+            <div className="text-xs text-zinc-500">Ed25519 signatures, x402 payments, or on-chain escrow</div>
           </div>
           <div className="border border-zinc-200 rounded-xl p-4 text-center">
-            <div className="text-sm font-semibold text-zinc-900 mb-1">Any EVM chain</div>
-            <div className="text-xs text-zinc-500">Deploy the escrow contract on Base, Ethereum, Arbitrum, or any EVM</div>
+            <div className="text-sm font-semibold text-zinc-900 mb-1">Any platform</div>
+            <div className="text-xs text-zinc-500">HTTP-native. Works with any agent framework or language</div>
           </div>
         </div>
       </div>
@@ -1013,7 +1013,7 @@ function CTASection() {
             View on GitHub
           </a>
           <a
-            href="https://github.com/lucidedev/bcp-protocol/blob/main/spec/SPEC.md"
+            href="https://github.com/lucidedev/bcp-protocol/blob/main/spec/SPEC-v0.2.md"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 border border-zinc-200 hover:border-zinc-300 bg-white text-zinc-700 font-medium px-5 py-2.5 rounded-lg transition-all text-sm"
@@ -1053,7 +1053,7 @@ function Footer() {
             GitHub
           </a>
           <span className="w-1 h-1 rounded-full bg-zinc-300" />
-          <span className="font-mono">v0.1.0</span>
+          <span className="font-mono">v0.2.0</span>
         </div>
       </div>
     </footer>

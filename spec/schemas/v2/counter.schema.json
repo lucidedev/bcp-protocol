@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bcp-protocol.org/schemas/v0.2/counter.json",
+  "title": "BCP v0.2 COUNTER",
+  "type": "object",
+  "required": ["bcp_version", "type", "sessionId", "timestamp", "counterPrice"],
+  "additionalProperties": false,
+  "properties": {
+    "bcp_version": { "const": "0.2" },
+    "type": { "const": "counter" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "counterPrice": { "type": "number", "minimum": 0 },
+    "reason": { "type": "string" },
+    "callbackUrl": { "type": "string", "format": "uri" },
+    "signature": { "type": "string" }
+  }
+}

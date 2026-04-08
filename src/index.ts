@@ -97,3 +97,35 @@ export { BCP, BCPConfig, TransactParams, DealResult } from './sdk';
 // Split SDK — separate buyer/seller (production architecture)
 export { BCPBuyer, BCPBuyerConfig, PurchaseParams, BuyerDealResult, DisputeParams, DisputeResult, UnfreezeResult, NETWORKS, NetworkConfig, RFQParams, RFQQuote, RFQResult } from './buyer';
 export { BCPSeller, BCPSellerConfig, SellerListenOptions, SellerDealResult, PricingStrategy } from './seller';
+
+// ── BCP v0.2 ─────────────────────────────────────────────────────────────────
+// Lean messages, optional auth/escrow, single endpoint
+
+export type {
+  AuthMode,
+  Settlement,
+  BCPEnvelope,
+  IntentMessageV2,
+  QuoteMessageV2,
+  CounterMessageV2,
+  CommitMessageV2,
+  FulfilMessageV2,
+  DisputeMessageV2,
+  BCPMessageV2,
+} from './messages/v2';
+
+export {
+  SessionManagerV2,
+  SessionV2,
+  SessionStateV2,
+  SessionStoreV2,
+  InMemorySessionStoreV2,
+  BCPErrorV2,
+  BCPErrorCodeV2,
+} from './state/session-v2';
+
+export {
+  validateMessageV2,
+  validateMessageTypeV2,
+  BCPMessageTypeV2,
+} from './validation/validator-v2';
