@@ -19,12 +19,22 @@ export const metadata: Metadata = {
     description:
       "The open protocol for AI agent commerce. Built on x402. Apache 2.0.",
     type: "website",
+    url: "https://lucidedev.github.io/bcp-protocol",
+    images: [
+      {
+        url: "https://lucidedev.github.io/bcp-protocol/og.png",
+        width: 1200,
+        height: 630,
+        alt: "BCP — The open protocol for AI agent commerce",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "BCP — Business Commerce Protocol",
     description:
       "The open protocol for AI agent commerce. Built on x402. Apache 2.0.",
+    images: ["https://lucidedev.github.io/bcp-protocol/og.png"],
   },
 };
 
