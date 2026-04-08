@@ -203,26 +203,6 @@ function Hero() {
           </button>
         </motion.div>
 
-        {/* Install command */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.5 }}
-          className="inline-flex items-center gap-3 bg-zinc-900 rounded-lg px-5 py-2.5 font-mono text-sm shadow-sm mb-10"
-        >
-          <span className="text-zinc-500 select-none">$</span>
-          <span className="text-zinc-300">npm install</span>
-          <span className="text-[#4D65FF] font-medium">@bcp-protocol/sdk</span>
-          <button
-            onClick={() =>
-              navigator.clipboard.writeText("npm install @bcp-protocol/sdk")
-            }
-            className="ml-1 text-zinc-600 hover:text-zinc-400 transition-colors"
-          >
-            <Copy size={13} />
-          </button>
-        </motion.div>
-
         {/* Animated state machine */}
         <motion.div
           initial={{ opacity: 0 }}
