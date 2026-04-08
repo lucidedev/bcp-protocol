@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bcp-protocol.org/schemas/counter.schema.json",
+  "title": "BCP COUNTER Message",
+  "description": "Either party proposes modified terms",
+  "type": "object",
+  "required": [
+    "bcp_version",
+    "message_type",
+    "counter_id",
+    "ref_id",
+    "initiated_by",
+    "timestamp",
+    "proposed_changes",
+    "new_validity_until",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bcp_version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "message_type": {
+      "type": "string",
+      "const": "COUNTER"
+    },
+    "counter_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 unique identifier for this counter-offer"
+    },
+    "ref_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Reference to the quote_id or counter_id being countered"
+    },
+    "initiated_by": {
+      "type": "string",
+      "enum": ["buyer", "seller"],
+      "description": "Which party initiated this counter-offer"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp"
+    },
+    "proposed_changes": {
+      "type": "object",
+      "description": "Any fields from the offer object being proposed as changes",
+      "properties": {
+        "price": {
+          "type": "number",
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string"
+        },
+        "payment_terms": {
+          "type": "string",
+          "enum": ["immediate", "net15", "net30", "net45", "net60", "net90"]
+        },
+        "delivery_date": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "line_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["description", "qty", "unit_price", "unit"],
+            "additionalProperties": false,
+            "properties": {
+              "description": { "type": "string" },
+              "qty": { "type": "number", "minimum": 0 },
+              "unit_price": { "type": "number", "minimum": 0 },
+              "unit": { "type": "string" }
+            }
+          }
+        },
+        "early_pay_discount": {
+          "type": "object",
+          "required": ["discount_percent", "if_paid_within_days"],
+          "additionalProperties": false,
+          "properties": {
+            "discount_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+            "if_paid_within_days": { "type": "integer", "minimum": 1 }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Optional explanation for the counter-offer"
+    },
+    "new_validity_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "New validity timestamp for this counter-offer"
+    },
+    "signature": {
+      "type": "string",
+      "description": "Ed25519 signature of the canonical JSON payload"
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bcp-protocol.org/schemas/dispute.schema.json",
+  "title": "BCP DISPUTE Message",
+  "description": "Either party freezes escrow and raises an issue",
+  "type": "object",
+  "required": [
+    "bcp_version",
+    "message_type",
+    "dispute_id",
+    "commit_id",
+    "timestamp",
+    "raised_by",
+    "reason",
+    "requested_resolution",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bcp_version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "message_type": {
+      "type": "string",
+      "const": "DISPUTE"
+    },
+    "dispute_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 unique identifier for this dispute"
+    },
+    "commit_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Reference to the COMMIT under dispute"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp"
+    },
+    "raised_by": {
+      "type": "string",
+      "enum": ["buyer", "seller"],
+      "description": "Which party raised the dispute"
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["partial_delivery", "non_delivery", "quality_issue", "payment_failure", "other"],
+      "description": "Reason for the dispute"
+    },
+    "evidence_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Optional SHA-256 hash of evidence"
+    },
+    "evidence_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Optional URL to evidence"
+    },
+    "requested_resolution": {
+      "type": "string",
+      "enum": ["full_refund", "partial_refund", "redeliver", "negotiate"],
+      "description": "Resolution requested by the disputing party"
+    },
+    "signature": {
+      "type": "string",
+      "description": "Ed25519 signature of the canonical JSON payload"
+    }
+  }
+}

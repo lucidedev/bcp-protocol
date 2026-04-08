@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bcp-protocol.org/schemas/fulfil.schema.json",
+  "title": "BCP FULFIL Message",
+  "description": "Seller confirms delivery and triggers escrow release",
+  "type": "object",
+  "required": [
+    "bcp_version",
+    "message_type",
+    "fulfil_id",
+    "commit_id",
+    "timestamp",
+    "delivery_proof",
+    "invoice",
+    "settlement_trigger",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bcp_version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "message_type": {
+      "type": "string",
+      "const": "FULFIL"
+    },
+    "fulfil_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 unique identifier for this fulfilment"
+    },
+    "commit_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Reference to the COMMIT being fulfilled"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp"
+    },
+    "delivery_proof": {
+      "type": "object",
+      "required": ["type", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["api_verified", "hash", "delivery_receipt", "service_confirmation"],
+          "description": "Type of delivery proof"
+        },
+        "evidence": {
+          "type": "string",
+          "description": "Evidence of delivery (hash, URL, receipt ID, etc.)"
+        }
+      }
+    },
+    "invoice": {
+      "type": "object",
+      "required": ["format", "invoice_id", "invoice_hash", "invoice_url"],
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "const": "UBL2.1",
+          "description": "Invoice format — always UBL 2.1"
+        },
+        "invoice_id": {
+          "type": "string",
+          "description": "Unique invoice identifier"
+        },
+        "invoice_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 hash of the UBL invoice XML"
+        },
+        "invoice_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL where the UBL invoice can be retrieved"
+        }
+      }
+    },
+    "settlement_trigger": {
+      "type": "string",
+      "enum": ["immediate", "scheduled"],
+      "description": "When to trigger settlement via x402"
+    },
+    "signature": {
+      "type": "string",
+      "description": "Ed25519 signature of the canonical JSON payload"
+    }
+  }
+}

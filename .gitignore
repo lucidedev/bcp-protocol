@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+*.js.map
+contracts/lib/
+contracts/out/
+contracts/cache/
+demo/.next/
+website/.next/
+
+# Agents / IDE
+.agents/
+.claude/

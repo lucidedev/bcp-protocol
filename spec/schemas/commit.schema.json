@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bcp-protocol.org/schemas/commit.schema.json",
+  "title": "BCP COMMIT Message",
+  "description": "Buyer accepts offer and locks escrow",
+  "type": "object",
+  "required": [
+    "bcp_version",
+    "message_type",
+    "commit_id",
+    "accepted_ref_id",
+    "timestamp",
+    "buyer_approval",
+    "escrow",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bcp_version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "message_type": {
+      "type": "string",
+      "const": "COMMIT"
+    },
+    "commit_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 unique identifier for this commit"
+    },
+    "accepted_ref_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Reference to the accepted quote_id or counter_id"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp"
+    },
+    "buyer_approval": {
+      "type": "object",
+      "required": ["approved_by", "approval_type", "threshold_exceeded"],
+      "additionalProperties": false,
+      "properties": {
+        "approved_by": {
+          "type": "string",
+          "description": "Wallet address of the approver"
+        },
+        "approval_type": {
+          "type": "string",
+          "enum": ["autonomous", "human_required"],
+          "description": "Whether this approval was autonomous or required human sign-off"
+        },
+        "threshold_exceeded": {
+          "type": "boolean",
+          "description": "Whether the spending threshold was exceeded"
+        }
+      }
+    },
+    "escrow": {
+      "type": "object",
+      "required": ["amount", "currency", "escrow_contract_address", "release_condition", "payment_schedule"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Amount locked in escrow"
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency code"
+        },
+        "escrow_contract_address": {
+          "type": "string",
+          "description": "Address of the escrow smart contract"
+        },
+        "release_condition": {
+          "type": "string",
+          "enum": ["fulfil_confirmed", "dispute_timeout_72h"],
+          "description": "Condition under which escrow is released"
+        },
+        "payment_schedule": {
+          "type": "object",
+          "required": ["type", "due_date"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["immediate", "net15", "net30", "net45", "net60", "net90"],
+              "description": "Payment schedule type matching payment_terms"
+            },
+            "due_date": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Payment due date in ISO 8601"
+            }
+          }
+        }
+      }
+    },
+    "po_reference": {
+      "type": "string",
+      "description": "Optional purchase order reference"
+    },
+    "signature": {
+      "type": "string",
+      "description": "Ed25519 signature of the canonical JSON payload"
+    }
+  }
+}
