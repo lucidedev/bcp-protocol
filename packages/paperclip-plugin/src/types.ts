@@ -23,12 +23,12 @@ export interface Deal {
 }
 
 /**
- * BCP v0.2 wire message. Standard BCP envelope fields live at the top level;
- * the `payload` bag carries type-specific data that maps 1:1 to v0.2 fields
- * (e.g. payload.price → QuoteMessageV2.price).
+ * BCP v0.3 wire message. Standard BCP envelope fields live at the top level;
+ * the `payload` bag carries type-specific data that maps 1:1 to v0.3 fields
+ * (e.g. payload.price → QuoteMessage.price).
  */
 export interface BcpMessage {
-  bcp_version?: "0.2";
+  bcp_version?: "0.3";
   type:
     | "intent"
     | "quote"

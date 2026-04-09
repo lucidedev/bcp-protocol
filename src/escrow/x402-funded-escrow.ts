@@ -16,9 +16,7 @@
  */
 
 import { ethers } from 'ethers';
-import { CommitMessage } from '../messages/commit';
-import { FulfilMessage } from '../messages/fulfil';
-import { DisputeMessage } from '../messages/dispute';
+import type { CommitMessage, FulfilMessage, DisputeMessage } from '../messages/types';
 import type {
   EscrowProvider,
   EscrowReceipt,
@@ -94,28 +92,26 @@ export class X402FundedEscrowProvider implements EscrowProvider {
    * calls lockToken() on the BCP escrow contract.
    */
   async lock(commit: CommitMessage): Promise<EscrowReceipt> {
-    const amount = commit.escrow.amount;
-    const currency = commit.escrow.currency;
+    const amount = commit.agreedPrice;
+    const currency = commit.currency;
     const endpoint = this.config.sellerX402Endpoint;
 
     log.info('Initiating x402-funded escrow lock', {
       amount,
       currency,
       endpoint,
-      commitId: commit.commit_id,
+      sessionId: commit.sessionId,
     });
 
     // Step 1: Send lock request → expect 402
     const lockRequest = {
       action: 'escrow_lock',
-      commit_id: commit.commit_id,
+      session_id: commit.sessionId,
       amount,
       currency,
       buyer: this.wallet.address,
       seller: this.config.sellerAddress,
       escrow_contract: this.config.contractAddress,
-      release_condition: commit.escrow.release_condition,
-      payment_schedule: commit.escrow.payment_schedule,
     };
 
     log.debug('Sending initial lock request to x402 endpoint');
@@ -139,7 +135,7 @@ export class X402FundedEscrowProvider implements EscrowProvider {
       // Step 3: Sign EIP-191 payment proof
       const payloadToSign = JSON.stringify({
         action: 'escrow_lock',
-        commit_id: commit.commit_id,
+        session_id: commit.sessionId,
         amount: pd.amount,
         recipient: pd.recipient,
         token: pd.token || this.config.tokenAddress || 'ETH',
@@ -177,11 +173,11 @@ export class X402FundedEscrowProvider implements EscrowProvider {
 
         log.info('x402 escrow lock confirmed', {
           txHash: result.txHash,
-          commitId: commit.commit_id,
+          sessionId: commit.sessionId,
         });
 
         return {
-          escrow_id: result.escrowId || commit.commit_id,
+          escrow_id: result.escrowId || commit.sessionId,
           amount,
           currency,
           contract_address: this.config.contractAddress,
@@ -201,7 +197,7 @@ export class X402FundedEscrowProvider implements EscrowProvider {
         txHash: string;
       };
       return {
-        escrow_id: commit.commit_id,
+        escrow_id: commit.sessionId,
         amount,
         currency,
         contract_address: this.config.contractAddress,
@@ -219,7 +215,7 @@ export class X402FundedEscrowProvider implements EscrowProvider {
    * The x402 layer is only used for funding. Release uses the standard path.
    */
   async release(fulfil: FulfilMessage): Promise<ReleaseReceipt> {
-    const commitHash = ethers.keccak256(ethers.toUtf8Bytes(fulfil.commit_id));
+    const commitHash = ethers.keccak256(ethers.toUtf8Bytes(fulfil.sessionId));
     const contract = new ethers.Contract(
       this.config.contractAddress,
       [
@@ -252,7 +248,7 @@ export class X402FundedEscrowProvider implements EscrowProvider {
    * Freeze escrow — direct on-chain call during dispute.
    */
   async freeze(dispute: DisputeMessage): Promise<FreezeReceipt> {
-    const commitHash = ethers.keccak256(ethers.toUtf8Bytes(dispute.commit_id));
+    const commitHash = ethers.keccak256(ethers.toUtf8Bytes(dispute.sessionId));
     const contract = new ethers.Contract(
       this.config.contractAddress,
       [
@@ -274,7 +270,7 @@ export class X402FundedEscrowProvider implements EscrowProvider {
     return {
       escrow_id: commitHash,
       amount,
-      dispute_id: dispute.dispute_id,
+      sessionId: dispute.sessionId,
       frozen_at: new Date().toISOString(),
       status: 'frozen',
       tx_hash: receipt!.hash,
@@ -284,8 +280,8 @@ export class X402FundedEscrowProvider implements EscrowProvider {
   /**
    * Approve unfreeze — direct on-chain call (2-of-2 multisig).
    */
-  async approveUnfreeze(commitId: string): Promise<UnfreezeApproval> {
-    const commitHash = ethers.keccak256(ethers.toUtf8Bytes(commitId));
+  async approveUnfreeze(sessionId: string): Promise<UnfreezeApproval> {
+    const commitHash = ethers.keccak256(ethers.toUtf8Bytes(sessionId));
     const contract = new ethers.Contract(
       this.config.contractAddress,
       [

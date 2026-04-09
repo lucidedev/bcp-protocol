@@ -9,9 +9,7 @@
  */
 
 import { ethers } from 'ethers';
-import { CommitMessage } from '../messages/commit';
-import { FulfilMessage } from '../messages/fulfil';
-import { DisputeMessage } from '../messages/dispute';
+import type { CommitMessage, FulfilMessage, DisputeMessage } from '../messages/types';
 import {
   EscrowProvider,
   EscrowReceipt,
@@ -63,7 +61,7 @@ export interface OnChainEscrowConfig {
 const BASE_SEPOLIA_RPC = 'https://sepolia.base.org';
 
 /**
- * Convert a UUID-style commit_id to a bytes32 by keccak256-hashing it.
+ * Convert a UUID-style sessionId to a bytes32 by keccak256-hashing it.
  */
 function commitIdToBytes32(commitId: string): string {
   return ethers.keccak256(ethers.toUtf8Bytes(commitId));
@@ -82,7 +80,7 @@ export class OnChainEscrowProvider implements EscrowProvider {
   private tokenAddress: string | null;
   private tokenDecimals: number;
 
-  /** Map commit_id → bytes32 hash for reverse lookups */
+  /** Map sessionId → bytes32 hash for reverse lookups */
   private commitMap: Map<string, string> = new Map();
 
   constructor(config: OnChainEscrowConfig) {
@@ -101,15 +99,15 @@ export class OnChainEscrowProvider implements EscrowProvider {
   }
 
   async lock(commit: CommitMessage): Promise<EscrowReceipt> {
-    const commitHash = commitIdToBytes32(commit.commit_id);
-    this.commitMap.set(commit.commit_id, commitHash);
+    const commitHash = commitIdToBytes32(commit.sessionId);
+    this.commitMap.set(commit.sessionId, commitHash);
 
-    const releaseAfter = Math.floor(new Date(commit.escrow.payment_schedule.due_date).getTime() / 1000);
+    const releaseAfter = Math.floor(Date.now() / 1000) + 30 * 86400; // 30 days default
     let tx: ethers.ContractTransactionResponse;
 
     if (this.tokenAddress) {
       // ERC-20 path: approve then lockToken
-      const amount = ethers.parseUnits(commit.escrow.amount.toString(), this.tokenDecimals);
+      const amount = ethers.parseUnits(commit.agreedPrice.toString(), this.tokenDecimals);
       const tokenContract = new ethers.Contract(this.tokenAddress, ERC20_ABI, this.buyerWallet);
 
       // Check existing allowance — only approve if needed
@@ -136,7 +134,7 @@ export class OnChainEscrowProvider implements EscrowProvider {
       );
     } else {
       // Native ETH path
-      const valueWei = ethers.parseEther(commit.escrow.amount.toString());
+      const valueWei = ethers.parseEther(commit.agreedPrice.toString());
       tx = await this.contract.lock(
         commitHash,
         this.buyerWallet.address,
@@ -150,8 +148,8 @@ export class OnChainEscrowProvider implements EscrowProvider {
 
     return {
       escrow_id: commitHash,
-      amount: commit.escrow.amount,
-      currency: commit.escrow.currency,
+      amount: commit.agreedPrice,
+      currency: commit.currency,
       contract_address: this.contractAddress,
       locked_at: new Date().toISOString(),
       status: 'locked',
@@ -160,8 +158,8 @@ export class OnChainEscrowProvider implements EscrowProvider {
   }
 
   async release(fulfil: FulfilMessage): Promise<ReleaseReceipt> {
-    const commitHash = this.commitMap.get(fulfil.commit_id)
-      || commitIdToBytes32(fulfil.commit_id);
+    const commitHash = this.commitMap.get(fulfil.sessionId)
+      || commitIdToBytes32(fulfil.sessionId);
 
     // Fetch on-chain data for amount + token
     const data = await this.contract.getEscrow(commitHash);
@@ -185,8 +183,8 @@ export class OnChainEscrowProvider implements EscrowProvider {
   }
 
   async freeze(dispute: DisputeMessage): Promise<FreezeReceipt> {
-    const commitHash = this.commitMap.get(dispute.commit_id)
-      || commitIdToBytes32(dispute.commit_id);
+    const commitHash = this.commitMap.get(dispute.sessionId)
+      || commitIdToBytes32(dispute.sessionId);
 
     const data = await this.contract.getEscrow(commitHash);
     const tokenAddr: string = data[5];
@@ -200,16 +198,16 @@ export class OnChainEscrowProvider implements EscrowProvider {
     return {
       escrow_id: commitHash,
       amount,
-      dispute_id: dispute.dispute_id,
+      sessionId: dispute.sessionId,
       frozen_at: new Date().toISOString(),
       status: 'frozen',
       tx_hash: receipt!.hash,
     };
   }
 
-  async approveUnfreeze(commitId: string): Promise<UnfreezeApproval> {
-    const commitHash = this.commitMap.get(commitId)
-      || commitIdToBytes32(commitId);
+  async approveUnfreeze(sessionId: string): Promise<UnfreezeApproval> {
+    const commitHash = this.commitMap.get(sessionId)
+      || commitIdToBytes32(sessionId);
 
     const tx = await this.contract.approveUnfreeze(commitHash);
     const receipt = await tx.wait();

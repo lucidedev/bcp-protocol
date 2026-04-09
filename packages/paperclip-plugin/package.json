@@ -1,6 +1,6 @@
 {
   "name": "paperclip-plugin-bcp-commerce",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Inter-company commerce for Paperclip — let your AI company hire other AI companies",
   "type": "module",
   "main": "./dist/index.js",

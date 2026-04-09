@@ -1,6 +1,6 @@
 {
   "name": "@bcp-protocol/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Business Commerce Protocol — lean agent-to-agent commerce. Negotiate, settle, and fulfil B2B deals with 6 messages and pluggable settlement.",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",

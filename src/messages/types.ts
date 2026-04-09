@@ -1,42 +1,44 @@
 /**
- * BCP v0.2 Message Types
+ * BCP Message Types
  *
- * Lean message definitions — only the fields the state machine needs.
- * Signatures and escrow are optional (pluggable auth + settlement).
+ * 7 lean message types for agent-to-agent commerce.
+ * Only the fields the state machine needs — everything else is optional.
  *
- * @module messages/v2
+ * @module messages/types
  */
 
 // ── Auth + Settlement ──────────────────────────────────────────────
 
 /** Authentication mode for a session */
-export type AuthMode = 'none' | 'platform' | 'ed25519';
+export type AuthMode = 'none' | 'platform' | 'ed25519' | 'did';
 
 /** Settlement profile agreed between parties */
 export type Settlement = 'none' | 'invoice' | 'x402' | 'escrow';
 
 // ── Common envelope fields ─────────────────────────────────────────
 
-/** Fields present on every BCP v0.2 message */
+/** Fields present on every BCP message */
 export interface BCPEnvelope {
   /** Protocol version */
-  bcp_version: '0.2';
+  bcp_version: '0.3';
   /** Message type */
-  type: 'intent' | 'quote' | 'counter' | 'commit' | 'fulfil' | 'dispute';
+  type: 'intent' | 'quote' | 'counter' | 'commit' | 'fulfil' | 'accept' | 'dispute';
   /** Session identifier — set by buyer in INTENT, reused throughout */
   sessionId: string;
   /** ISO 8601 creation timestamp */
   timestamp: string;
   /** URL for async response delivery */
   callbackUrl?: string;
-  /** Ed25519 hex signature (required when auth is ed25519) */
+  /** Ed25519 hex signature (required when auth is ed25519 or did) */
   signature?: string;
+  /** DID identifier of the sender (e.g. did:key:z6Mk...) */
+  did?: string;
 }
 
 // ── Message Types ──────────────────────────────────────────────────
 
 /** Buyer declares what they need */
-export interface IntentMessageV2 extends BCPEnvelope {
+export interface IntentMessage extends BCPEnvelope {
   type: 'intent';
   /** What the buyer needs, in natural language */
   service: string;
@@ -48,10 +50,12 @@ export interface IntentMessageV2 extends BCPEnvelope {
   auth?: AuthMode;
   /** Shared ID for multi-seller RFQ broadcasts */
   rfqId?: string;
+  /** Seller's A2A Agent Card URL (for discovery) */
+  agentUrl?: string;
 }
 
 /** Seller responds with pricing */
-export interface QuoteMessageV2 extends BCPEnvelope {
+export interface QuoteMessage extends BCPEnvelope {
   type: 'quote';
   /** Offered price */
   price: number;
@@ -68,7 +72,7 @@ export interface QuoteMessageV2 extends BCPEnvelope {
 }
 
 /** Either party proposes different terms */
-export interface CounterMessageV2 extends BCPEnvelope {
+export interface CounterMessage extends BCPEnvelope {
   type: 'counter';
   /** Proposed price */
   counterPrice: number;
@@ -77,7 +81,7 @@ export interface CounterMessageV2 extends BCPEnvelope {
 }
 
 /** Buyer accepts and hires the seller */
-export interface CommitMessageV2 extends BCPEnvelope {
+export interface CommitMessage extends BCPEnvelope {
   type: 'commit';
   /** The price being committed to */
   agreedPrice: number;
@@ -93,7 +97,7 @@ export interface CommitMessageV2 extends BCPEnvelope {
 }
 
 /** Seller confirms delivery */
-export interface FulfilMessageV2 extends BCPEnvelope {
+export interface FulfilMessage extends BCPEnvelope {
   type: 'fulfil';
   /** What was delivered */
   deliverables?: string[];
@@ -105,8 +109,19 @@ export interface FulfilMessageV2 extends BCPEnvelope {
   invoiceUrl?: string;
 }
 
+/** Buyer confirms receipt — bilateral receipt for trust records */
+export interface AcceptMessage extends BCPEnvelope {
+  type: 'accept';
+  /** SHA-256 hash of the FULFIL message being accepted */
+  fulfilHash?: string;
+  /** Optional buyer rating (1-5) */
+  rating?: number;
+  /** Optional buyer feedback */
+  feedback?: string;
+}
+
 /** Either party flags a problem */
-export interface DisputeMessageV2 extends BCPEnvelope {
+export interface DisputeMessage extends BCPEnvelope {
   type: 'dispute';
   /** What went wrong */
   reason: string;
@@ -116,11 +131,12 @@ export interface DisputeMessageV2 extends BCPEnvelope {
 
 // ── Union type ─────────────────────────────────────────────────────
 
-/** Any BCP v0.2 message */
-export type BCPMessageV2 =
-  | IntentMessageV2
-  | QuoteMessageV2
-  | CounterMessageV2
-  | CommitMessageV2
-  | FulfilMessageV2
-  | DisputeMessageV2;
+/** Any BCP message */
+export type BCPMessage =
+  | IntentMessage
+  | QuoteMessage
+  | CounterMessage
+  | CommitMessage
+  | FulfilMessage
+  | AcceptMessage
+  | DisputeMessage;

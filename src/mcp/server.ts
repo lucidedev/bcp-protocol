@@ -24,8 +24,7 @@ const log = createLogger('bcp-mcp');
 
 interface ActiveSession {
   sellerUrl: string;
-  commitId?: string;
-  intentId?: string;
+  sessionId?: string;
   price?: number;
   currency?: string;
   state: string;
@@ -46,14 +45,10 @@ function getBuyer(): BCPBuyer {
   const contractAddress = process.env.BCP_ESCROW_CONTRACT_ADDRESS;
 
   if (!evmPrivateKey) {
-    throw new Error(
-      'Set BUYER_EVM_PRIVATE_KEY env var. The MCP server needs it to sign transactions.'
-    );
+    throw new Error('Set BUYER_EVM_PRIVATE_KEY env var.');
   }
   if (!contractAddress) {
-    throw new Error(
-      'Set BCP_ESCROW_CONTRACT_ADDRESS env var (deployed BCPEscrow contract).'
-    );
+    throw new Error('Set BCP_ESCROW_CONTRACT_ADDRESS env var.');
   }
 
   buyer = new BCPBuyer({ network, evmPrivateKey, contractAddress });
@@ -64,25 +59,21 @@ function getBuyer(): BCPBuyer {
 
 const server = new McpServer({
   name: 'bcp-commerce',
-  version: '0.1.0',
+  version: '0.3.0',
 });
 
 // ── Tool: bcp_purchase ─────────────────────────────────────────────
 
 server.tool(
   'bcp_purchase',
-  'Execute a full B2B purchase: INTENT → QUOTE → COMMIT → FULFIL. ' +
+  'Execute a full purchase: INTENT → QUOTE → COMMIT → FULFIL. ' +
   'Negotiates with a seller, locks escrow on-chain, and waits for delivery.',
   {
-    seller_url: z.string().describe('Seller BCP server URL (e.g. http://seller.example.com:3001)'),
-    item_description: z.string().describe('What to buy (e.g. "500 units of premium API credits")'),
-    quantity: z.number().positive().describe('Number of units'),
-    budget_max: z.number().positive().describe('Maximum budget in USDC'),
-    org_id: z.string().optional().describe('Buyer organization ID'),
-    payment_terms: z.enum(['immediate', 'net15', 'net30', 'net45', 'net60', 'net90']).optional()
-      .describe('Payment terms (default: immediate)'),
-    max_accept_price: z.number().optional().describe('Auto-accept if total ≤ this price'),
-    counter_price: z.number().optional().describe('Counter-offer price (triggers negotiation)'),
+    seller_url: z.string().describe('Seller BCP server URL'),
+    service: z.string().describe('What to buy (natural language description)'),
+    budget: z.number().positive().optional().describe('Maximum budget in USDC'),
+    currency: z.string().optional().describe('Currency (default: USDC)'),
+    counter_price: z.number().optional().describe('Counter-offer price'),
   },
   async (params) => {
     try {
@@ -90,24 +81,17 @@ server.tool(
 
       const purchaseParams: PurchaseParams = {
         seller: params.seller_url,
-        orgId: params.org_id,
-        item: {
-          description: params.item_description,
-          qty: params.quantity,
-        },
-        budget: params.budget_max,
-        terms: params.payment_terms as PurchaseParams['terms'],
-        maxAcceptPrice: params.max_accept_price,
+        service: params.service,
+        budget: params.budget,
+        currency: params.currency,
         counterPrice: params.counter_price,
       };
 
       const deal = await b.purchase(purchaseParams);
 
-      // Track session
-      sessions.set(deal.commitId, {
+      sessions.set(deal.sessionId, {
         sellerUrl: params.seller_url,
-        commitId: deal.commitId,
-        intentId: deal.intentId,
+        sessionId: deal.sessionId,
         price: deal.price,
         currency: deal.currency,
         state: deal.state,
@@ -120,8 +104,7 @@ server.tool(
           text: JSON.stringify({
             success: true,
             deal: {
-              commitId: deal.commitId,
-              intentId: deal.intentId,
+              sessionId: deal.sessionId,
               price: deal.price,
               currency: deal.currency,
               state: deal.state,
@@ -129,7 +112,6 @@ server.tool(
               lockUrl: deal.lockUrl,
               releaseTxHash: deal.releaseTxHash,
               releaseUrl: deal.releaseUrl,
-              invoiceId: deal.invoiceId,
             },
           }, null, 2),
         }],
@@ -149,23 +131,17 @@ server.tool(
   }
 );
 
-
-
 // ── Tool: bcp_dispute ──────────────────────────────────────────────
 
 server.tool(
   'bcp_dispute',
-  'Raise a dispute on a committed deal. Freezes escrow on-chain. ' +
-  'Both parties must agree (approveUnfreeze) to release funds after a dispute.',
+  'Raise a dispute on a committed deal. Freezes escrow on-chain.',
   {
     seller_url: z.string().describe('Seller BCP server URL'),
-    commit_id: z.string().describe('The commit_id of the deal to dispute'),
-    reason: z.enum(['partial_delivery', 'non_delivery', 'quality_issue', 'payment_failure', 'other'])
-      .describe('Why the dispute is being raised'),
-    requested_resolution: z.enum(['full_refund', 'partial_refund', 'redeliver', 'negotiate'])
-      .describe('What resolution the buyer is requesting'),
-    evidence_hash: z.string().optional().describe('SHA-256 hash of evidence'),
-    evidence_url: z.string().optional().describe('URL to evidence document'),
+    session_id: z.string().describe('The sessionId of the deal to dispute'),
+    reason: z.string().describe('Why the dispute is being raised'),
+    resolution: z.enum(['refund', 'redeliver', 'negotiate']).optional()
+      .describe('Requested resolution'),
   },
   async (params) => {
     try {
@@ -173,16 +149,13 @@ server.tool(
 
       const result = await b.dispute({
         seller: params.seller_url,
-        commitId: params.commit_id,
+        sessionId: params.session_id,
         reason: params.reason,
-        requestedResolution: params.requested_resolution,
-        evidenceHash: params.evidence_hash,
-        evidenceUrl: params.evidence_url,
+        resolution: params.resolution,
       });
 
-      // Update session state
-      const session = sessions.get(params.commit_id);
-      if (session) session.state = 'DISPUTED';
+      const session = sessions.get(params.session_id);
+      if (session) session.state = 'disputed';
 
       return {
         content: [{
@@ -190,8 +163,7 @@ server.tool(
           text: JSON.stringify({
             success: true,
             dispute: {
-              disputeId: result.disputeId,
-              commitId: result.commitId,
+              sessionId: result.sessionId,
               freezeTxHash: result.freezeTxHash,
               freezeUrl: result.freezeUrl,
             },
@@ -217,19 +189,18 @@ server.tool(
 
 server.tool(
   'bcp_approve_unfreeze',
-  'Approve unfreezing a disputed escrow (buyer side). Requires both buyer AND seller ' +
-  'to call approveUnfreeze before funds are released.',
+  'Approve unfreezing a disputed escrow (buyer side).',
   {
-    commit_id: z.string().describe('The commit_id of the disputed deal'),
+    session_id: z.string().describe('The sessionId of the disputed deal'),
   },
   async (params) => {
     try {
       const b = getBuyer();
 
-      const result = await b.approveUnfreeze(params.commit_id);
+      const result = await b.approveUnfreeze(params.session_id);
 
-      const session = sessions.get(params.commit_id);
-      if (session && result.fullyUnfrozen) session.state = 'COMMITTED';
+      const session = sessions.get(params.session_id);
+      if (session && result.fullyUnfrozen) session.state = 'committed';
 
       return {
         content: [{
@@ -237,7 +208,7 @@ server.tool(
           text: JSON.stringify({
             success: true,
             unfreeze: {
-              commitId: result.commitId,
+              sessionId: result.sessionId,
               approvalTxHash: result.approvalTxHash,
               approvalUrl: result.approvalUrl,
               fullyUnfrozen: result.fullyUnfrozen,
@@ -264,7 +235,7 @@ server.tool(
 
 server.tool(
   'bcp_sessions',
-  'List all active BCP deal sessions tracked by this server.',
+  'List all active BCP deal sessions.',
   {},
   async () => {
     const list = Array.from(sessions.entries()).map(([id, s]) => ({
@@ -285,35 +256,15 @@ server.tool(
   }
 );
 
-// ── Resource: protocol spec ────────────────────────────────────────
-
-server.resource(
-  'bcp-spec',
-  'bcp://spec/erc-bcp',
-  async () => {
-    const fs = await import('fs');
-    const path = await import('path');
-    const specPath = path.join(__dirname, '../../spec/ERC-BCP.md');
-    const content = fs.readFileSync(specPath, 'utf-8');
-    return {
-      contents: [{
-        uri: 'bcp://spec/erc-bcp',
-        mimeType: 'text/markdown',
-        text: content,
-      }],
-    };
-  }
-);
-
-// ── Start ──────────────────────────────────────────────────────────
+// ── Connect via stdio ──────────────────────────────────────────────
 
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  log.info('BCP MCP server running on stdio');
+  log.info('BCP MCP server running via stdio');
 }
 
 main().catch((err) => {
-  console.error('BCP MCP server failed to start:', err);
+  log.error('Failed to start MCP server', { error: err });
   process.exit(1);
 });

@@ -181,13 +181,9 @@ app.post('/heartbeat', async (req: Request, res: Response) => {
   try {
     deal = await buyer.purchase({
       seller: parsed.sellerUrl,
-      orgId: 'BuyerCorp',
-      item: {
-        description: parsed.description,
-        qty: 1,
-      },
+      service: parsed.description,
       budget: parsed.budget,
-      terms: 'immediate',
+      currency: 'USDC',
       ...(parsed.counterPrice !== undefined ? { counterPrice: parsed.counterPrice } : {}),
     });
   } catch (err) {
@@ -211,28 +207,24 @@ app.post('/heartbeat', async (req: Request, res: Response) => {
     ``,
     `Lock tx:     ${explorerBase}/tx/${deal.lockTxHash}`,
     `Release tx:  ${explorerBase}/tx/${deal.releaseTxHash}`,
-    `Invoice:     ${deal.invoiceId}`,
-    `Commit ID:   ${deal.commitId}`,
+    `Session:     ${deal.sessionId}`,
   ].join('\n');
 
   console.log('\n  Deal complete:');
   console.log(`    price:       $${deal.price} USDC`);
   console.log(`    lockTx:      ${deal.lockTxHash}`);
   console.log(`    releaseTx:   ${deal.releaseTxHash}`);
-  console.log(`    invoice:     ${deal.invoiceId}`);
+  console.log(`    session:     ${deal.sessionId}`);
 
   return res.json({
     success: true,
     output,
     data: {
-      commitId: deal.commitId,
-      intentId: deal.intentId,
+      sessionId: deal.sessionId,
       price: deal.price,
       currency: deal.currency,
       lockTxHash: deal.lockTxHash,
       releaseTxHash: deal.releaseTxHash,
-      invoiceId: deal.invoiceId,
-      invoiceHash: deal.invoiceHash,
       state: deal.state,
     },
     tokensUsed: 0,

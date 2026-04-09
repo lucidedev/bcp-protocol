@@ -2,12 +2,12 @@
  * BCP Live Demo — real USDC escrow on Base Sepolia.
  *
  * Runs two AI companies through a complete B2B commerce cycle:
- *   1. BuyerCorp sends INTENT (procurement need)
+ *   1. BuyerCorp sends INTENT
  *   2. DataSeller Co responds with QUOTE
- *   3. BuyerCorp sends COUNTER (lower price)
+ *   3. BuyerCorp sends COUNTER
  *   4. DataSeller Co accepts with revised QUOTE
  *   5. BuyerCorp sends COMMIT → locks USDC in on-chain escrow
- *   6. DataSeller Co sends FULFIL → releases escrow, generates UBL invoice
+ *   6. DataSeller Co sends FULFIL → releases escrow
  *
  * Every step produces real Basescan tx hashes.
  *
@@ -39,7 +39,6 @@ async function main(): Promise<void> {
 
   const provider = new ethers.JsonRpcProvider(ids.rpcUrl);
 
-  // Pre-flight checks
   log.info('Pre-flight checks', {
     chain: 'Base Sepolia (84532)',
     contract: ids.escrowContractAddress,
@@ -52,7 +51,6 @@ async function main(): Promise<void> {
   const sellerBal = await provider.getBalance(ids.seller.evmAddress);
   const usdcContract = new ethers.Contract(USDC_ADDRESS, [
     'function balanceOf(address account) external view returns (uint256)',
-    'function decimals() external view returns (uint8)',
   ], provider);
   const buyerUSDC = await usdcContract.balanceOf(ids.buyer.evmAddress);
   const sellerUSDCBefore = await usdcContract.balanceOf(ids.seller.evmAddress);
@@ -64,19 +62,11 @@ async function main(): Promise<void> {
     seller_usdc: ethers.formatUnits(sellerUSDCBefore, USDC_DECIMALS),
   });
 
-  if (buyerBal === 0n) {
-    log.error('Buyer has no ETH for gas — fund the wallet first');
-    process.exit(1);
-  }
-  if (buyerUSDC === 0n) {
-    log.error('Buyer has no USDC — fund the wallet first');
-    process.exit(1);
-  }
+  if (buyerBal === 0n) { log.error('Buyer has no ETH for gas'); process.exit(1); }
+  if (buyerUSDC === 0n) { log.error('Buyer has no USDC'); process.exit(1); }
 
-  // ── Infrastructure setup ─────────────────────────────────────────
   const sessionManager = new SessionManager();
 
-  // Buyer-side escrow provider (USDC mode)
   const buyerEscrow: EscrowProvider = new OnChainEscrowProvider({
     rpcUrl: ids.rpcUrl,
     contractAddress: ids.escrowContractAddress,
@@ -86,7 +76,6 @@ async function main(): Promise<void> {
     tokenDecimals: USDC_DECIMALS,
   });
 
-  // Seller-side escrow provider (for release calls)
   const sellerEscrow: EscrowProvider = OnChainEscrowProvider.createSellerInstance({
     rpcUrl: ids.rpcUrl,
     contractAddress: ids.escrowContractAddress,
@@ -96,73 +85,51 @@ async function main(): Promise<void> {
     tokenDecimals: USDC_DECIMALS,
   });
 
-  // Agent keypairs
   const buyerKeys = { privateKey: ids.buyer.ed25519PrivateKey, publicKey: ids.buyer.ed25519PublicKey };
   const sellerKeys = { privateKey: ids.seller.ed25519PrivateKey, publicKey: ids.seller.ed25519PublicKey };
 
   const buyer = createBuyerAgent(ids.buyer.orgId, sessionManager, buyerEscrow, buyerKeys);
   const seller = createSellerAgent(ids.seller.orgId, sessionManager, sellerEscrow, sellerKeys);
 
-  log.info('Agents initialized', {
-    buyer: `${buyer.config.orgId} (BuyerCorp)`,
-    seller: `${seller.config.orgId} (DataSeller Co)`,
-  });
+  const DEMO_AMOUNT = 2;
 
-  // ── Demo amount: 2 USDC ───────────────────────────────────────────
-  const DEMO_AMOUNT = 2;  // 2 USDC
+  log.info('━━━ Step 1: BuyerCorp sends INTENT ━━━');
+  const intent = buyer.createIntent('Enterprise API Data Feed', DEMO_AMOUNT);
+  log.info(`INTENT sent: ${intent.sessionId}`);
 
-  // ── Step 1: INTENT ───────────────────────────────────────────────
-  log.info('━━━ Step 1: BuyerCorp declares procurement need ━━━');
-  const intent = buyer.createIntent('Enterprise API Data Feed', 1, DEMO_AMOUNT);
-  log.info(`INTENT sent: ${intent.intent_id}`);
-
-  // ── Step 2: QUOTE ────────────────────────────────────────────────
-  log.info('━━━ Step 2: DataSeller Co responds with quote ━━━');
-  // Unit price such that total (qty * unitPrice * 1.15 markup) ≈ 12 USDC
+  log.info('━━━ Step 2: DataSeller responds with QUOTE ━━━');
   const quote1 = seller.createQuote(intent, DEMO_AMOUNT * 1.04);
-  log.info(`QUOTE sent: ${quote1.quote_id} — price: ${quote1.offer.price} USDC`);
+  log.info(`QUOTE sent: ${quote1.sessionId} — price: ${quote1.price} USDC`);
 
-  // ── Step 3: COUNTER ──────────────────────────────────────────────
-  log.info('━━━ Step 3: BuyerCorp counters with lower price ━━━');
+  log.info('━━━ Step 3: BuyerCorp counters ━━━');
   const counter = buyer.createCounter(quote1, DEMO_AMOUNT);
-  log.info(`COUNTER sent: ${counter.counter_id} — proposed: ${DEMO_AMOUNT} USDC`);
+  log.info(`COUNTER sent: ${counter.sessionId} — proposed: ${DEMO_AMOUNT} USDC`);
 
-  // ── Step 4: Revised QUOTE ────────────────────────────────────────
-  log.info('━━━ Step 4: DataSeller Co accepts counter ━━━');
+  log.info('━━━ Step 4: DataSeller accepts counter ━━━');
   const quote2 = seller.createCounterQuote(counter, intent, true);
-  // Override to immediate payment for demo (so escrow can be released now)
-  quote2.offer.payment_terms = 'immediate';
-  log.info(`QUOTE (revised) sent: ${quote2.quote_id} — price: ${quote2.offer.price} USDC`);
+  log.info(`QUOTE (revised): ${quote2.sessionId} — price: ${quote2.price} USDC`);
 
-  // ── Step 5: COMMIT + ESCROW LOCK (real on-chain tx) ──────────────
   log.info('━━━ Step 5: BuyerCorp commits — locking USDC in escrow ━━━');
   const commit = await buyer.createCommit(quote2);
-  log.info(`COMMIT sent: ${commit.commit_id}`);
-  log.info('Escrow LOCKED on Base Sepolia');
+  log.info(`COMMIT sent: ${commit.sessionId}`);
 
-  // Wait for the lock to propagate across RPC nodes before releasing
   log.info('Waiting for block confirmation...');
   await new Promise((resolve) => setTimeout(resolve, 4000));
 
-  // ── Step 6: FULFIL + ESCROW RELEASE (real on-chain tx) ───────────
-  log.info('━━━ Step 6: DataSeller Co delivers and releases escrow ━━━');
+  log.info('━━━ Step 6: DataSeller delivers and releases escrow ━━━');
   const { fulfil, invoiceXml } = await seller.createFulfil(commit, quote2);
-  log.info(`FULFIL sent: ${fulfil.fulfil_id}`);
-  log.info('Escrow RELEASED on Base Sepolia');
+  log.info(`FULFIL sent: ${fulfil.sessionId}`);
 
-  // ── Post-trade balances ──────────────────────────────────────────
   const buyerUSDCAfter = await usdcContract.balanceOf(ids.buyer.evmAddress);
   const sellerUSDCAfter = await usdcContract.balanceOf(ids.seller.evmAddress);
 
-  const session = sessionManager.getSession(intent.intent_id)!;
+  const session = sessionManager.getSession(intent.sessionId)!;
 
   log.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   log.info('TRANSACTION COMPLETE', {
-    intent_id: intent.intent_id,
-    negotiated_price: `${quote2.offer.price} USDC`,
-    commit_id: commit.commit_id,
-    fulfil_id: fulfil.fulfil_id,
-    final_state: session.state,
+    sessionId: intent.sessionId,
+    price: `${quote2.price} USDC`,
+    state: session.state,
     messages: session.messages.length,
   });
 
@@ -174,27 +141,13 @@ async function main(): Promise<void> {
   });
 
   log.info('MESSAGE FLOW', {
-    flow: session.messages.map((msg) => {
-      let id = '?';
-      switch (msg.message_type) {
-        case 'INTENT': id = msg.intent_id; break;
-        case 'QUOTE': id = msg.quote_id; break;
-        case 'COUNTER': id = msg.counter_id; break;
-        case 'COMMIT': id = msg.commit_id; break;
-        case 'FULFIL': id = msg.fulfil_id; break;
-        case 'DISPUTE': id = msg.dispute_id; break;
-      }
-      return `${msg.message_type} → ${id.substring(0, 8)}…`;
-    }),
+    flow: session.messages.map((msg) => `${msg.type} → ${msg.sessionId.substring(0, 8)}…`),
   });
 
   log.info('UBL INVOICE', { preview: invoiceXml.substring(0, 300) });
-
   log.info('All tx hashes viewable at: https://sepolia.basescan.org');
   log.info('Contract: ' + ids.escrowContractAddress);
-
   log.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  log.info('Demo complete — no humans, no mocks, real USDC on Base Sepolia');
 }
 
 main().catch((err) => {

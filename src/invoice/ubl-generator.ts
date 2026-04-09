@@ -6,9 +6,7 @@
  */
 
 import { createHash } from 'crypto';
-import { QuoteMessage } from '../messages/quote';
-import { CommitMessage } from '../messages/commit';
-import { FulfilMessage } from '../messages/fulfil';
+import type { QuoteMessage, CommitMessage, FulfilMessage } from '../messages/types';
 
 /** Generated UBL invoice result */
 export interface UBLInvoiceResult {
@@ -50,23 +48,24 @@ export function generateUBLInvoice(
   commit: CommitMessage,
   fulfil: FulfilMessage
 ): UBLInvoiceResult {
-  const invoiceId = fulfil.invoice.invoice_id;
+  const invoiceId = `INV-${commit.sessionId.slice(0, 8)}`;
   const issueDate = fulfil.timestamp.split('T')[0];
-  const dueDate = commit.escrow.payment_schedule.due_date.split('T')[0];
+  const dueDate = new Date(Date.now() + 30 * 86400_000).toISOString().split('T')[0];
 
-  const lineItemsXml = quote.offer.line_items
+  const deliverables = quote.deliverables ?? fulfil.deliverables ?? ['Service'];
+  const lineItemsXml = deliverables
     .map((item, index) => {
-      const lineTotal = item.qty * item.unit_price;
+      const lineTotal = commit.agreedPrice / deliverables.length;
       return `
     <cac:InvoiceLine>
       <cbc:ID>${index + 1}</cbc:ID>
-      <cbc:InvoicedQuantity unitCode="${escapeXml(item.unit)}">${item.qty}</cbc:InvoicedQuantity>
-      <cbc:LineExtensionAmount currencyID="${escapeXml(quote.offer.currency)}">${lineTotal.toFixed(2)}</cbc:LineExtensionAmount>
+      <cbc:InvoicedQuantity unitCode="EA">1</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="${escapeXml(commit.currency)}">${lineTotal.toFixed(2)}</cbc:LineExtensionAmount>
       <cac:Item>
-        <cbc:Name>${escapeXml(item.description)}</cbc:Name>
+        <cbc:Name>${escapeXml(item)}</cbc:Name>
       </cac:Item>
       <cac:Price>
-        <cbc:PriceAmount currencyID="${escapeXml(quote.offer.currency)}">${item.unit_price.toFixed(2)}</cbc:PriceAmount>
+        <cbc:PriceAmount currencyID="${escapeXml(commit.currency)}">${lineTotal.toFixed(2)}</cbc:PriceAmount>
       </cac:Price>
     </cac:InvoiceLine>`;
     })
@@ -81,32 +80,29 @@ export function generateUBLInvoice(
   <cbc:IssueDate>${issueDate}</cbc:IssueDate>
   <cbc:DueDate>${dueDate}</cbc:DueDate>
   <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
-  <cbc:DocumentCurrencyCode>${escapeXml(quote.offer.currency)}</cbc:DocumentCurrencyCode>
-  <cbc:BuyerReference>${escapeXml(commit.po_reference || commit.commit_id)}</cbc:BuyerReference>
+  <cbc:DocumentCurrencyCode>${escapeXml(commit.currency)}</cbc:DocumentCurrencyCode>
+  <cbc:BuyerReference>${escapeXml(commit.sessionId)}</cbc:BuyerReference>
   <cac:AccountingSupplierParty>
     <cac:Party>
       <cac:PartyIdentification>
-        <cbc:ID>${escapeXml(quote.seller.org_id)}</cbc:ID>
+        <cbc:ID>${escapeXml(quote.did ?? 'seller')}</cbc:ID>
       </cac:PartyIdentification>
-      <cac:PartyName>
-        <cbc:Name>${escapeXml(quote.seller.org_id)}</cbc:Name>
-      </cac:PartyName>
     </cac:Party>
   </cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
       <cac:PartyIdentification>
-        <cbc:ID>${escapeXml(commit.buyer_approval.approved_by)}</cbc:ID>
+        <cbc:ID>${escapeXml(commit.did ?? 'buyer')}</cbc:ID>
       </cac:PartyIdentification>
     </cac:Party>
   </cac:AccountingCustomerParty>
   <cac:PaymentMeans>
     <cbc:PaymentMeansCode>ZZZ</cbc:PaymentMeansCode>
-    <cbc:PaymentID>${escapeXml(commit.escrow.escrow_contract_address)}</cbc:PaymentID>
+    <cbc:PaymentID>${escapeXml(commit.escrow?.contractAddress ?? commit.sessionId)}</cbc:PaymentID>
   </cac:PaymentMeans>
   <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount currencyID="${escapeXml(quote.offer.currency)}">${quote.offer.price.toFixed(2)}</cbc:LineExtensionAmount>
-    <cbc:PayableAmount currencyID="${escapeXml(quote.offer.currency)}">${quote.offer.price.toFixed(2)}</cbc:PayableAmount>
+    <cbc:LineExtensionAmount currencyID="${escapeXml(commit.currency)}">${commit.agreedPrice.toFixed(2)}</cbc:LineExtensionAmount>
+    <cbc:PayableAmount currencyID="${escapeXml(commit.currency)}">${commit.agreedPrice.toFixed(2)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${lineItemsXml}
 </Invoice>`;
 

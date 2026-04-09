@@ -6,7 +6,7 @@
 
 BCP defines the structured commerce conversation between two AI agents — negotiation, commitment, fulfilment, and dispute — before and around payment. Settlement flows through [x402](https://www.x402.org/), Coinbase's open protocol for stablecoin payments over HTTP using the `402 Payment Required` status code. BCP never replaces or forks x402.
 
-**Version:** 0.1 (Draft)  
+**Version:** 0.3  
 **License:** Apache 2.0
 
 ---
@@ -214,8 +214,8 @@ The reference implementation includes a fully on-chain escrow provider (`OnChain
   import { SessionStore, SessionManager } from 'bcp-protocol';
   
   class RedisSessionStore implements SessionStore {
-    get(intentId: string) { /* redis.get(`bcp:${intentId}`) */ }
-    save(session: Session) { /* redis.set(`bcp:${session.intentId}`, ...) */ }
+    get(sessionId: string) { /* redis.get(`bcp:${sessionId}`) */ }
+    save(session: Session) { /* redis.set(`bcp:${session.sessionId}`, ...) */ }
     // ...
   }
   

@@ -14,9 +14,7 @@
  * @module escrow/escrow
  */
 
-import { CommitMessage } from '../messages/commit';
-import { FulfilMessage } from '../messages/fulfil';
-import { DisputeMessage } from '../messages/dispute';
+import type { CommitMessage, FulfilMessage, DisputeMessage } from '../messages/types';
 
 /** Receipt returned after locking escrow */
 export interface EscrowReceipt {
@@ -58,8 +56,8 @@ export interface FreezeReceipt {
   escrow_id: string;
   /** Amount frozen */
   amount: number;
-  /** Dispute reference */
-  dispute_id: string;
+  /** Session ID of the disputed escrow */
+  sessionId: string;
   /** Timestamp of freeze */
   frozen_at: string;
   /** Status */
@@ -110,8 +108,8 @@ export interface EscrowProvider {
   /**
    * Approve unfreezing a disputed escrow. Requires 2-of-2 approval
    * (both buyer and seller must call this) before the escrow returns to Locked.
-   * @param commitId - The commit_id of the disputed escrow
+   * @param sessionId - The sessionId of the disputed escrow
    * @returns Approval receipt indicating whether the escrow is fully unfrozen
    */
-  approveUnfreeze(commitId: string): Promise<UnfreezeApproval>;
+  approveUnfreeze(sessionId: string): Promise<UnfreezeApproval>;
 }

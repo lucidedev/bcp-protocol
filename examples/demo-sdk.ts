@@ -8,7 +8,6 @@ import 'dotenv/config';
 import { BCP } from '../src';
 
 async function main() {
-  // Pre-flight: check required env vars
   const required = ['BUYER_EVM_PRIVATE_KEY', 'SELLER_EVM_PRIVATE_KEY', 'BCP_ESCROW_CONTRACT_ADDRESS'];
   const missing = required.filter((k) => !process.env[k]);
   if (missing.length) {
@@ -19,17 +18,16 @@ async function main() {
   const bcp = new BCP({ network: 'base-sepolia' });
 
   const deal = await bcp.transact({
-    buyer:  { orgId: 'buyercorp',   budget: 25 },
-    seller: { orgId: 'dataseller' },
-    item:   { description: 'Q2 Market Research Report', qty: 1, unitPrice: 2 },
-    terms:  'immediate',
+    buyer:  { budget: 25 },
+    seller: {},
+    service: 'Q2 Market Research Report',
   });
 
-  console.log(`\n✅ Deal complete`);
+  console.log(`\nDeal complete`);
+  console.log(`   Session:  ${deal.sessionId}`);
   console.log(`   Price:    ${deal.price} ${deal.currency}`);
   console.log(`   Lock:     ${deal.lockUrl}`);
   console.log(`   Release:  ${deal.releaseUrl}`);
-  console.log(`   Invoice:  ${deal.invoiceHash}`);
   console.log(`   State:    ${deal.state}`);
 }
 

@@ -1,9 +1,9 @@
 /**
- * BCP transport client — HTTP client for sending BCP messages.
+ * BCP transport client — HTTP client for sending BCP messages to POST /bcp.
  * @module transport/client
  */
 
-import { BCPMessage } from '../state/session';
+import type { BCPMessage } from '../messages/types';
 import { signMessage } from '../validation/signature';
 import { validateMessage } from '../validation/validator';
 
@@ -11,19 +11,15 @@ import { validateMessage } from '../validation/validator';
 export interface BCPClientConfig {
   /** Base URL of the BCP server (e.g. http://localhost:3000) */
   baseUrl: string;
-  /** Private key for signing outbound messages (hex string) */
-  privateKey: string;
+  /** Ed25519 private key for signing outbound messages (hex string) */
+  privateKey?: string;
 }
 
 /** Server response for accepted messages */
 export interface BCPResponse {
-  /** Whether the message was accepted */
   accepted: boolean;
-  /** The ID assigned to the message */
-  message_id: string;
-  /** Current session state */
+  sessionId: string;
   session_state: string;
-  /** Optional response message from the server */
   response?: BCPMessage;
 }
 
@@ -36,18 +32,8 @@ export interface BCPErrorResponse {
   };
 }
 
-/** Message type to endpoint path mapping */
-const ENDPOINT_MAP: Record<string, string> = {
-  INTENT: '/bcp/intent',
-  QUOTE: '/bcp/quote',
-  COUNTER: '/bcp/counter',
-  COMMIT: '/bcp/commit',
-  FULFIL: '/bcp/fulfil',
-  DISPUTE: '/bcp/dispute',
-};
-
 /**
- * BCP protocol client for sending signed messages to a BCP server.
+ * BCP protocol client for sending messages to a BCP server via POST /bcp.
  */
 export class BCPClient {
   private config: BCPClientConfig;
@@ -57,19 +43,15 @@ export class BCPClient {
   }
 
   /**
-   * Send a BCP message to the server. The message will be validated,
-   * signed, and POSTed to the appropriate endpoint.
-   *
-   * @param message - The BCP message to send (without signature)
-   * @returns Server response
-   * @throws Error on validation failure or network error
+   * Send a BCP message to the server. Validates, optionally signs,
+   * and POSTs to /bcp.
    */
   async send(message: Record<string, unknown>): Promise<BCPResponse> {
-    // Validate before sending
-    const messageWithPlaceholderSig = { ...message, signature: 'placeholder' };
-    const validation = validateMessage(messageWithPlaceholderSig);
+    // Validate before sending (allow missing signature)
+    const check = { ...message };
+    if (!check.signature) delete check.signature;
+    const validation = validateMessage({ ...check, signature: check.signature || 'placeholder' });
     if (!validation.valid) {
-      // Check only non-signature errors
       const realErrors = validation.errors.filter(e => e.path !== '/signature');
       if (realErrors.length > 0) {
         throw new Error(
@@ -78,19 +60,15 @@ export class BCPClient {
       }
     }
 
-    // Sign the message
-    const signature = signMessage(message, this.config.privateKey);
-    const signedMessage = { ...message, signature };
-
-    // Determine endpoint
-    const messageType = message.message_type as string;
-    const path = ENDPOINT_MAP[messageType];
-    if (!path) {
-      throw new Error(`Unknown message type: ${messageType}`);
+    // Sign if private key is provided
+    let signedMessage = message;
+    if (this.config.privateKey) {
+      const signature = signMessage(message, this.config.privateKey);
+      signedMessage = { ...message, signature };
     }
 
-    // Send HTTP POST
-    const url = `${this.config.baseUrl}${path}`;
+    // Send to unified /bcp endpoint
+    const url = `${this.config.baseUrl}/bcp`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -102,7 +80,7 @@ export class BCPClient {
     if (!response.ok) {
       const errBody = body as BCPErrorResponse;
       throw new Error(
-        `BCP server error ${response.status}: [${errBody.error?.code}] ${errBody.error?.message}`
+        `BCP server error [${errBody.error.code}]: ${errBody.error.message}`
       );
     }
 
@@ -111,14 +89,22 @@ export class BCPClient {
 }
 
 /**
- * Create a BCP client configured to talk to a local server.
- * @param port - The port the server is running on
- * @param privateKey - The private key for signing messages
- * @returns Configured BCP client
+ * Create a "local" client that talks to an Express app directly (for testing).
  */
-export function createLocalClient(port: number, privateKey: string): BCPClient {
-  return new BCPClient({
-    baseUrl: `http://localhost:${port}`,
-    privateKey,
+export function createLocalClient(app: import('express').Application): BCPClient {
+  // Start temporary server
+  let port = 0;
+  const server = app.listen(0, () => {
+    const addr = server.address();
+    if (addr && typeof addr !== 'string') port = addr.port;
   });
+
+  const client = new BCPClient({ baseUrl: `http://localhost:${port}` });
+
+  // Attach close function
+  (client as unknown as Record<string, unknown>)['close'] = () => {
+    server.close();
+  };
+
+  return client;
 }

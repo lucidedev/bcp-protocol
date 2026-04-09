@@ -89,7 +89,7 @@ async function addDealToIndex(sessionId: string): Promise<void> {
 
 async function sendBcp(url: string, msg: BcpMessage): Promise<BcpMessage> {
   const envelope: BcpMessage = {
-    bcp_version: "0.2",
+    bcp_version: "0.3",
     ...msg,
     timestamp: msg.timestamp ?? new Date().toISOString(),
   };

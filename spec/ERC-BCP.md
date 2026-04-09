@@ -35,7 +35,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ### Protocol Version
 
-Current version: `0.1`. All messages carry a `bcp_version` field. Implementations MUST reject messages with an unsupported version.
+Current version: `0.3`. All messages carry a `bcp_version` field. Implementations MUST reject messages with an unsupported version.
 
 ### Transport
 
@@ -44,24 +44,19 @@ Current version: `0.1`. All messages carry a `bcp_version` field. Implementation
 | Protocol | HTTPS |
 | Format | JSON (`Content-Type: application/json`) |
 | Method | POST |
-| Authentication | Ed25519 message-level signatures |
+| Authentication | Ed25519 message-level signatures (optional per-session) |
 
-#### Endpoints
+#### Endpoint
 
-Each BCP node exposes:
+Each BCP node exposes a single unified endpoint:
 
 ```
-POST /bcp/intent    — Submit INTENT
-POST /bcp/quote     — Submit QUOTE
-POST /bcp/counter   — Submit COUNTER
-POST /bcp/commit    — Submit COMMIT
-POST /bcp/fulfil    — Submit FULFIL
-POST /bcp/dispute   — Submit DISPUTE
+POST /bcp    — Submit any BCP message
 ```
 
-Successful responses return `200 OK` with:
+The `type` field in the request body determines the message kind. Successful responses return `200 OK` with:
 ```json
-{ "accepted": true, "message_id": "<uuid>", "session_state": "<state>" }
+{ "accepted": true, "sessionId": "<uuid>", "state": "<state>" }
 ```
 
 ### Message Signing (Ed25519)
@@ -77,31 +72,37 @@ Verification reverses this process. Invalid signatures MUST be rejected with err
 
 ### Message Types
 
+All messages share a common envelope (`BCPEnvelope`):
+
+```typescript
+{
+  bcp_version: "0.3",         // Protocol version
+  type: string,               // Message kind (lowercase)
+  sessionId: string,          // Session identifier (set by buyer in INTENT)
+  timestamp: string,          // ISO 8601 creation time
+  callbackUrl?: string,       // URL for async response delivery
+  signature?: string,         // Ed25519 hex signature
+  did?: string                // DID identifier of the sender
+}
+```
+
 #### INTENT — Buyer Declares Procurement Need
 
 ```typescript
 {
-  bcp_version: "0.1",
-  message_type: "INTENT",
-  intent_id: UUID,             // Unique identifier
-  timestamp: ISO8601,          // Creation time
-  buyer: {
-    org_id: string,            // Organization identifier
-    agent_wallet_address: string, // EVM address
-    credential: string,        // Ed25519 public key
-    spending_limit: number,    // Max authorized spend
-    currency: string           // e.g. "USDC"
-  },
-  requirements: {
-    category: string,          // Product/service category
-    quantity: number,
-    delivery_window: string,
-    budget_max: number,
-    payment_terms_acceptable: string[] // ["immediate","net30",...]
-  },
-  ttl: integer,                // Time to live (seconds)
-  rfq_id?: UUID,               // Optional: multi-seller RFQ broadcast ID
-  signature: string
+  bcp_version: "0.3",
+  type: "intent",
+  sessionId: UUID,
+  timestamp: ISO8601,
+  service: string,             // What the buyer needs (natural language)
+  budget?: number,             // Maximum budget
+  currency?: string,           // e.g. "USD", "USDC"
+  auth?: AuthMode,             // "none"|"platform"|"ed25519"|"did"
+  rfqId?: UUID,                // Shared ID for multi-seller RFQ broadcasts
+  agentUrl?: string,           // Seller's A2A Agent Card URL
+  callbackUrl?: string,
+  signature?: string,
+  did?: string
 }
 ```
 
@@ -109,34 +110,19 @@ Verification reverses this process. Invalid signatures MUST be rejected with err
 
 ```typescript
 {
-  bcp_version: "0.1",
-  message_type: "QUOTE",
-  quote_id: UUID,
-  intent_id: UUID,             // References the INTENT
+  bcp_version: "0.3",
+  type: "quote",
+  sessionId: UUID,             // References the INTENT session
   timestamp: ISO8601,
-  seller: {
-    org_id: string,
-    agent_wallet_address: string,
-    credential: string
-  },
-  offer: {
-    price: number,             // Total price
-    currency: string,
-    payment_terms: string,     // "immediate"|"net15"|...|"net90"
-    delivery_date: ISO8601,
-    validity_until: ISO8601,   // Quote expiry
-    line_items: [{
-      description: string,
-      qty: number,
-      unit_price: number,
-      unit: string
-    }],
-    early_pay_discount?: {
-      discount_percent: number,
-      if_paid_within_days: integer
-    }
-  },
-  signature: string
+  price: number,               // Offered price
+  currency: string,            // Currency code
+  deliverables?: string[],     // What the buyer will receive
+  estimatedDays?: number,      // Delivery estimate
+  validUntil?: ISO8601,        // Quote expiry
+  settlement?: Settlement,     // "none"|"invoice"|"x402"|"escrow"
+  callbackUrl?: string,
+  signature?: string,
+  did?: string
 }
 ```
 
@@ -144,21 +130,15 @@ Verification reverses this process. Invalid signatures MUST be rejected with err
 
 ```typescript
 {
-  bcp_version: "0.1",
-  message_type: "COUNTER",
-  counter_id: UUID,
-  ref_id: UUID,                // References quote_id or counter_id
-  initiated_by: "buyer"|"seller",
+  bcp_version: "0.3",
+  type: "counter",
+  sessionId: UUID,             // Same session
   timestamp: ISO8601,
-  proposed_changes: {          // Same schema as `offer`
-    price?: number,
-    payment_terms?: string,
-    delivery_date?: ISO8601,
-    line_items?: [...]
-  },
-  rationale?: string,
-  new_validity_until: ISO8601,
-  signature: string
+  counterPrice: number,        // Proposed price
+  reason?: string,             // Justification
+  callbackUrl?: string,
+  signature?: string,
+  did?: string
 }
 ```
 
@@ -166,27 +146,20 @@ Verification reverses this process. Invalid signatures MUST be rejected with err
 
 ```typescript
 {
-  bcp_version: "0.1",
-  message_type: "COMMIT",
-  commit_id: UUID,
-  accepted_ref_id: UUID,       // References accepted quote_id/counter_id
+  bcp_version: "0.3",
+  type: "commit",
+  sessionId: UUID,
   timestamp: ISO8601,
-  buyer_approval: {
-    approved_by: string,       // Approver wallet address
-    approval_type: "autonomous"|"human_required",
-    threshold_exceeded: boolean
+  agreedPrice: number,         // Committed price
+  currency: string,            // Currency code
+  settlement?: Settlement,     // How payment will be settled
+  escrow?: {
+    contractAddress: string,   // On-chain escrow contract
+    txHash?: string            // Lock transaction hash
   },
-  escrow: {
-    amount: number,
-    currency: string,
-    escrow_contract_address: string,
-    release_condition: "fulfil_confirmed"|"dispute_timeout_72h",
-    payment_schedule: {
-      type: string,            // Matches payment_terms
-      due_date: ISO8601
-    }
-  },
-  signature: string
+  callbackUrl?: string,
+  signature?: string,
+  did?: string
 }
 ```
 
@@ -194,23 +167,34 @@ Verification reverses this process. Invalid signatures MUST be rejected with err
 
 ```typescript
 {
-  bcp_version: "0.1",
-  message_type: "FULFIL",
-  fulfil_id: UUID,
-  commit_id: UUID,
+  bcp_version: "0.3",
+  type: "fulfil",
+  sessionId: UUID,
   timestamp: ISO8601,
-  delivery_proof: {
-    type: "api_verified"|"hash"|"delivery_receipt"|"service_confirmation",
-    evidence: string
-  },
-  invoice: {
-    format: "UBL2.1",
-    invoice_id: string,
-    invoice_hash: string,      // SHA-256 of UBL XML
-    invoice_url: string
-  },
-  settlement_trigger: "immediate"|"scheduled",
-  signature: string
+  deliverables?: string[],     // What was delivered
+  summary?: string,            // Work summary
+  proofHash?: string,          // SHA-256 of delivery evidence
+  invoiceUrl?: string,         // URL to formal invoice
+  callbackUrl?: string,
+  signature?: string,
+  did?: string
+}
+```
+
+#### ACCEPT — Buyer Confirms Receipt
+
+```typescript
+{
+  bcp_version: "0.3",
+  type: "accept",
+  sessionId: UUID,
+  timestamp: ISO8601,
+  fulfilHash?: string,         // SHA-256 hash of accepted FULFIL
+  rating?: number,             // 1-5 buyer rating
+  feedback?: string,           // Optional buyer feedback
+  callbackUrl?: string,
+  signature?: string,
+  did?: string
 }
 ```
 
@@ -218,17 +202,15 @@ Verification reverses this process. Invalid signatures MUST be rejected with err
 
 ```typescript
 {
-  bcp_version: "0.1",
-  message_type: "DISPUTE",
-  dispute_id: UUID,
-  commit_id: UUID,
+  bcp_version: "0.3",
+  type: "dispute",
+  sessionId: UUID,
   timestamp: ISO8601,
-  raised_by: "buyer"|"seller",
-  reason: "partial_delivery"|"non_delivery"|"quality_issue"|"payment_failure"|"other",
-  evidence_hash?: string,
-  evidence_url?: string,
-  requested_resolution: "full_refund"|"partial_refund"|"redeliver"|"negotiate",
-  signature: string
+  reason: string,              // What went wrong
+  resolution?: "refund"|"redeliver"|"negotiate",
+  callbackUrl?: string,
+  signature?: string,
+  did?: string
 }
 ```
 
@@ -238,26 +220,28 @@ Verification reverses this process. Invalid signatures MUST be rejected with err
 
 | State | Description |
 |---|---|
-| `INITIATED` | INTENT received, awaiting quotes |
-| `QUOTED` | QUOTE received, buyer may counter or commit |
-| `COUNTERED` | COUNTER received, negotiation in progress |
-| `COMMITTED` | Escrow locked, awaiting delivery |
-| `FULFILLED` | Delivery confirmed, escrow released |
-| `DISPUTED` | Escrow frozen, resolution pending |
+| `intent` | INTENT received, awaiting quotes |
+| `quoted` | QUOTE received, buyer may counter or commit |
+| `countered` | COUNTER received, negotiation in progress |
+| `committed` | Escrow locked, awaiting delivery |
+| `fulfilled` | Delivery confirmed, escrow released |
+| `accepted` | Buyer confirmed receipt |
+| `disputed` | Escrow frozen, resolution pending |
 
 #### Transition Table
 
 | From State | Message | To State |
 |---|---|---|
-| `INITIATED` | QUOTE | `QUOTED` |
-| `QUOTED` | COUNTER | `COUNTERED` |
-| `QUOTED` | COMMIT | `COMMITTED` |
-| `COUNTERED` | COUNTER | `COUNTERED` |
-| `COUNTERED` | QUOTE | `QUOTED` |
-| `COUNTERED` | COMMIT | `COMMITTED` |
-| `COMMITTED` | FULFIL | `FULFILLED` |
-| `COMMITTED` | DISPUTE | `DISPUTED` |
-| `DISPUTED` | UNFROZEN | `COMMITTED` |
+| `intent` | quote | `quoted` |
+| `quoted` | counter | `countered` |
+| `quoted` | commit | `committed` |
+| `countered` | counter | `countered` |
+| `countered` | quote | `quoted` |
+| `countered` | commit | `committed` |
+| `committed` | fulfil | `fulfilled` |
+| `committed` | dispute | `disputed` |
+| `fulfilled` | accept | `accepted` |
+| `disputed` | unfrozen | `committed` |
 
 Any transition not listed MUST be rejected with error `BCP_003`.
 
@@ -324,7 +308,7 @@ This allows existing x402 facilitators (Coinbase, etc.) to serve as the funding 
 2. Signature verification is mandatory — reject invalid signatures with `BCP_001`.
 3. Replay protection — track processed message IDs, reject duplicates.
 4. Timestamp validation — reject messages >5 minutes stale.
-5. Spending limit enforcement — COMMIT amount MUST NOT exceed buyer's `spending_limit`.
+5. Budget enforcement — COMMIT `agreedPrice` MUST NOT exceed buyer's `budget` from the original INTENT.
 6. Escrow contract MUST be permissionless — no admin keys, no upgrade proxy.
 
 ### Error Codes
@@ -361,19 +345,18 @@ This is a new standard with no backwards compatibility concerns. BCP messages in
 
 ## Reference Implementation
 
-TypeScript reference implementation: [`@bcp-protocol/sdk`](https://github.com/bcp-protocol/bcp)
+TypeScript reference implementation: [`@bcp-protocol/sdk`](https://github.com/lucidedev/bcp-protocol)
 
 ```typescript
-import { BCPBuyer } from '@bcp-protocol/sdk/buyer';
-import { BCPSeller } from '@bcp-protocol/sdk/seller';
+import { BCPBuyer } from 'bcp-protocol';
+import { BCPSeller } from 'bcp-protocol';
 
 // Buyer: negotiate and purchase
 const buyer = new BCPBuyer({ network: 'base-sepolia', evmPrivateKey: '0x...' });
 const deal = await buyer.purchase({
-  sellerUrl: 'https://seller.example.com',
-  category: 'cloud-compute',
-  quantity: 100,
-  budgetMax: 50,
+  seller: 'https://seller.example.com',
+  service: 'cloud-compute',
+  budget: 50,
   currency: 'USDC',
 });
 
@@ -381,7 +364,7 @@ const deal = await buyer.purchase({
 const seller = new BCPSeller({ network: 'base-sepolia', evmPrivateKey: '0x...' });
 seller.listen({
   port: 3001,
-  pricing: (intent) => ({ unitPrice: 0.45, description: 'GPU hours' }),
+  pricing: (intent) => ({ price: 45, description: 'GPU hours' }),
 });
 ```
 
@@ -392,8 +375,8 @@ Deployed escrow contract (Base Sepolia): `0xA5cB314e1dE37e0B6Fc4Fbf29B0bc4836c35
 - **Escrow contract**: Permissionless, no admin keys, no proxy upgrades. Funds are controlled solely by protocol rules.
 - **Message replay**: Implementations MUST track processed message IDs and reject duplicates.
 - **Key management**: Agent Ed25519 keys and EVM private keys MUST be stored securely. Implementations SHOULD support hardware wallets and key management services.
-- **Spending limits**: Buyer agents MUST enforce `spending_limit` checks before committing escrow. Servers MUST reject COMMIT messages exceeding the buyer's declared limit.
-- **Front-running**: Escrow lock transactions use `commitId` as a unique identifier (keccak256 hash), preventing duplicate locks.
+- **Budget enforcement**: Buyer agents MUST enforce `budget` checks before committing escrow. Servers MUST reject COMMIT messages exceeding the buyer's declared budget.
+- **Front-running**: Escrow lock transactions use `sessionId` as a unique identifier (keccak256 hash), preventing duplicate locks.
 
 ## Copyright
 

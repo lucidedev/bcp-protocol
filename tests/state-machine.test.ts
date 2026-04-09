@@ -1,332 +1,170 @@
 /**
- * Tests for BCP state machine transitions.
+ * BCP state machine tests — session lifecycle with v0.3 message types.
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import { SessionManager, BCPError, BCPErrorCode } from '../src/state/session';
-import { IntentMessage } from '../src/messages/intent';
-import { QuoteMessage } from '../src/messages/quote';
-import { CounterMessage } from '../src/messages/counter';
-import { CommitMessage } from '../src/messages/commit';
-import { FulfilMessage } from '../src/messages/fulfil';
-import { DisputeMessage } from '../src/messages/dispute';
+import type { BCPMessage, IntentMessage, QuoteMessage, CounterMessage, CommitMessage, FulfilMessage, AcceptMessage, DisputeMessage } from '../src/messages/types';
 
-function makeIntent(): IntentMessage {
-  return {
-    bcp_version: '0.1',
-    message_type: 'INTENT',
-    intent_id: uuidv4(),
-    timestamp: new Date().toISOString(),
-    buyer: {
-      org_id: 'buyer-org',
-      agent_wallet_address: '0x' + 'a'.repeat(64),
-      credential: '0x' + 'b'.repeat(64),
-      spending_limit: 50000,
-      currency: 'USDC',
-    },
-    requirements: {
-      category: 'Test',
-      quantity: 1,
-      delivery_window: 'P7D',
-      budget_max: 50000,
-      payment_terms_acceptable: ['immediate', 'net30'],
-    },
-    ttl: 3600,
-    signature: 'sig',
-  };
+const ts = () => new Date().toISOString();
+
+function makeIntent(sessionId: string = 'sess-1'): IntentMessage {
+  return { bcp_version: '0.3', type: 'intent', sessionId, timestamp: ts(), service: 'Logo design', budget: 500, currency: 'USDC' };
 }
 
-function makeQuote(intentId: string): QuoteMessage {
-  return {
-    bcp_version: '0.1',
-    message_type: 'QUOTE',
-    quote_id: uuidv4(),
-    intent_id: intentId,
-    timestamp: new Date().toISOString(),
-    seller: {
-      org_id: 'seller-org',
-      agent_wallet_address: '0x' + 'c'.repeat(64),
-      credential: '0x' + 'd'.repeat(64),
-    },
-    offer: {
-      price: 10000,
-      currency: 'USDC',
-      payment_terms: 'net30',
-      delivery_date: new Date().toISOString(),
-      validity_until: new Date(Date.now() + 7 * 86400_000).toISOString(),
-      line_items: [{ description: 'Item', qty: 1, unit_price: 10000, unit: 'EA' }],
-    },
-    signature: 'sig',
-  };
+function makeQuote(sessionId: string = 'sess-1'): QuoteMessage {
+  return { bcp_version: '0.3', type: 'quote', sessionId, timestamp: ts(), price: 250, currency: 'USDC', deliverables: ['Logo'] };
 }
 
-function makeCounter(refId: string): CounterMessage {
-  return {
-    bcp_version: '0.1',
-    message_type: 'COUNTER',
-    counter_id: uuidv4(),
-    ref_id: refId,
-    initiated_by: 'buyer',
-    timestamp: new Date().toISOString(),
-    proposed_changes: { price: 8000 },
-    new_validity_until: new Date(Date.now() + 3600_000).toISOString(),
-    signature: 'sig',
-  };
+function makeCounter(sessionId: string = 'sess-1'): CounterMessage {
+  return { bcp_version: '0.3', type: 'counter', sessionId, timestamp: ts(), counterPrice: 200 };
 }
 
-function makeCommit(refId: string): CommitMessage {
-  return {
-    bcp_version: '0.1',
-    message_type: 'COMMIT',
-    commit_id: uuidv4(),
-    accepted_ref_id: refId,
-    timestamp: new Date().toISOString(),
-    buyer_approval: {
-      approved_by: '0x' + 'a'.repeat(64),
-      approval_type: 'autonomous',
-      threshold_exceeded: false,
-    },
-    escrow: {
-      amount: 10000,
-      currency: 'USDC',
-      escrow_contract_address: '0x' + 'e'.repeat(40),
-      release_condition: 'fulfil_confirmed',
-      payment_schedule: { type: 'net30', due_date: new Date().toISOString() },
-    },
-    signature: 'sig',
-  };
+function makeCommit(sessionId: string = 'sess-1'): CommitMessage {
+  return { bcp_version: '0.3', type: 'commit', sessionId, timestamp: ts(), agreedPrice: 200, currency: 'USDC' };
 }
 
-function makeFulfil(commitId: string): FulfilMessage {
-  return {
-    bcp_version: '0.1',
-    message_type: 'FULFIL',
-    fulfil_id: uuidv4(),
-    commit_id: commitId,
-    timestamp: new Date().toISOString(),
-    delivery_proof: { type: 'service_confirmation', evidence: 'done' },
-    invoice: {
-      format: 'UBL2.1',
-      invoice_id: 'INV-1',
-      invoice_hash: 'a'.repeat(64),
-      invoice_url: 'https://example.com/inv',
-    },
-    settlement_trigger: 'immediate',
-    signature: 'sig',
-  };
+function makeFulfil(sessionId: string = 'sess-1'): FulfilMessage {
+  return { bcp_version: '0.3', type: 'fulfil', sessionId, timestamp: ts(), summary: 'Done' };
 }
 
-function makeDispute(commitId: string): DisputeMessage {
-  return {
-    bcp_version: '0.1',
-    message_type: 'DISPUTE',
-    dispute_id: uuidv4(),
-    commit_id: commitId,
-    timestamp: new Date().toISOString(),
-    raised_by: 'buyer',
-    reason: 'non_delivery',
-    requested_resolution: 'full_refund',
-    signature: 'sig',
-  };
+function makeAccept(sessionId: string = 'sess-1'): AcceptMessage {
+  return { bcp_version: '0.3', type: 'accept', sessionId, timestamp: ts(), rating: 5 };
 }
 
-describe('SessionManager state machine', () => {
+function makeDispute(sessionId: string = 'sess-1'): DisputeMessage {
+  return { bcp_version: '0.3', type: 'dispute', sessionId, timestamp: ts(), reason: 'Non-delivery' };
+}
+
+describe('SessionManager', () => {
   let sm: SessionManager;
 
   beforeEach(() => {
     sm = new SessionManager();
   });
 
-  test('INTENT creates session in INITIATED state', () => {
+  test('INTENT creates a new session in initiated state', () => {
+    const session = sm.processMessage(makeIntent());
+    expect(session.state).toBe('initiated');
+    expect(session.sessionId).toBe('sess-1');
+    expect(session.messages).toHaveLength(1);
+  });
+
+  test('full happy path: intent → quote → commit → fulfil → accept', () => {
+    sm.processMessage(makeIntent());
+    const s2 = sm.processMessage(makeQuote());
+    expect(s2.state).toBe('quoted');
+
+    const s3 = sm.processMessage(makeCommit());
+    expect(s3.state).toBe('committed');
+
+    const s4 = sm.processMessage(makeFulfil());
+    expect(s4.state).toBe('fulfilled');
+
+    const s5 = sm.processMessage(makeAccept());
+    expect(s5.state).toBe('accepted');
+
+    expect(s5.messages).toHaveLength(5);
+  });
+
+  test('negotiation path: intent → quote → counter → quote → commit', () => {
+    sm.processMessage(makeIntent());
+    sm.processMessage(makeQuote());
+    const s3 = sm.processMessage(makeCounter());
+    expect(s3.state).toBe('countered');
+
+    // Revised quote
+    const s4 = sm.processMessage(makeQuote());
+    expect(s4.state).toBe('quoted');
+
+    const s5 = sm.processMessage(makeCommit());
+    expect(s5.state).toBe('committed');
+  });
+
+  test('dispute from committed state', () => {
+    sm.processMessage(makeIntent());
+    sm.processMessage(makeQuote());
+    sm.processMessage(makeCommit());
+    const s4 = sm.processMessage(makeDispute());
+    expect(s4.state).toBe('disputed');
+  });
+
+  test('dispute from fulfilled state', () => {
+    sm.processMessage(makeIntent());
+    sm.processMessage(makeQuote());
+    sm.processMessage(makeCommit());
+    sm.processMessage(makeFulfil());
+    const s5 = sm.processMessage(makeDispute());
+    expect(s5.state).toBe('disputed');
+  });
+
+  test('rejects invalid transition: commit before quote', () => {
+    sm.processMessage(makeIntent());
+    expect(() => sm.processMessage(makeCommit())).toThrow(BCPError);
+  });
+
+  test('rejects invalid transition: fulfil before commit', () => {
+    sm.processMessage(makeIntent());
+    sm.processMessage(makeQuote());
+    expect(() => sm.processMessage(makeFulfil())).toThrow(BCPError);
+  });
+
+  test('rejects message for unknown session', () => {
+    expect(() => sm.processMessage(makeQuote('nonexistent'))).toThrow(BCPError);
+  });
+
+  test('rejects accept before fulfil', () => {
+    sm.processMessage(makeIntent());
+    sm.processMessage(makeQuote());
+    sm.processMessage(makeCommit());
+    expect(() => sm.processMessage(makeAccept())).toThrow(BCPError);
+  });
+
+  test('tracks buyer DID from intent', () => {
     const intent = makeIntent();
+    intent.did = 'did:key:z6Mk_buyer';
     const session = sm.processMessage(intent);
-    expect(session.state).toBe('INITIATED');
-    expect(session.intentId).toBe(intent.intent_id);
+    expect(session.buyerDid).toBe('did:key:z6Mk_buyer');
   });
 
-  test('QUOTE transitions INITIATED → QUOTED', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
+  test('tracks seller DID from quote', () => {
+    sm.processMessage(makeIntent());
+    const quote = makeQuote();
+    quote.did = 'did:key:z6Mk_seller';
     const session = sm.processMessage(quote);
-    expect(session.state).toBe('QUOTED');
+    expect(session.sellerDid).toBe('did:key:z6Mk_seller');
   });
 
-  test('COUNTER transitions QUOTED → COUNTERED', () => {
+  test('tracks callbackUrl from intent', () => {
     const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const counter = makeCounter(quote.quote_id);
-    const session = sm.processMessage(counter);
-    expect(session.state).toBe('COUNTERED');
+    intent.callbackUrl = 'https://buyer.example.com/callback';
+    const session = sm.processMessage(intent);
+    expect(session.callbackUrl).toBe('https://buyer.example.com/callback');
   });
 
-  test('COUNTER → COUNTER stays COUNTERED', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const counter1 = makeCounter(quote.quote_id);
-    sm.processMessage(counter1);
-    const counter2 = makeCounter(counter1.counter_id);
-    const session = sm.processMessage(counter2);
-    expect(session.state).toBe('COUNTERED');
+  test('multiple counter offers', () => {
+    sm.processMessage(makeIntent());
+    sm.processMessage(makeQuote());
+    sm.processMessage(makeCounter());
+    sm.processMessage(makeCounter());
+    const s = sm.processMessage(makeCounter());
+    expect(s.state).toBe('countered');
+    expect(s.messages).toHaveLength(5);
   });
 
-  test('COMMIT transitions QUOTED → COMMITTED', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const commit = makeCommit(quote.quote_id);
-    const session = sm.processMessage(commit);
-    expect(session.state).toBe('COMMITTED');
+  test('getSession returns session by ID', () => {
+    sm.processMessage(makeIntent());
+    const session = sm.getSession('sess-1');
+    expect(session).toBeDefined();
+    expect(session!.sessionId).toBe('sess-1');
   });
 
-  test('COMMIT transitions COUNTERED → COMMITTED', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const counter = makeCounter(quote.quote_id);
-    sm.processMessage(counter);
-    const commit = makeCommit(counter.counter_id);
-    const session = sm.processMessage(commit);
-    expect(session.state).toBe('COMMITTED');
-  });
-
-  test('FULFIL transitions COMMITTED → FULFILLED', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const commit = makeCommit(quote.quote_id);
-    sm.processMessage(commit);
-    const fulfil = makeFulfil(commit.commit_id);
-    const session = sm.processMessage(fulfil);
-    expect(session.state).toBe('FULFILLED');
-  });
-
-  test('DISPUTE transitions COMMITTED → DISPUTED', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const commit = makeCommit(quote.quote_id);
-    sm.processMessage(commit);
-    const dispute = makeDispute(commit.commit_id);
-    const session = sm.processMessage(dispute);
-    expect(session.state).toBe('DISPUTED');
-  });
-
-  test('markUnfrozen transitions DISPUTED → COMMITTED', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const commit = makeCommit(quote.quote_id);
-    sm.processMessage(commit);
-    const dispute = makeDispute(commit.commit_id);
-    sm.processMessage(dispute);
-    const session = sm.markUnfrozen(commit.commit_id);
-    expect(session.state).toBe('COMMITTED');
-  });
-
-  test('markUnfrozen rejects if not DISPUTED', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const commit = makeCommit(quote.quote_id);
-    sm.processMessage(commit);
-    // Session is COMMITTED, not DISPUTED
-    expect(() => sm.markUnfrozen(commit.commit_id)).toThrow(BCPError);
-  });
-
-  test('FULFIL works after DISPUTED → COMMITTED (unfreeze)', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const commit = makeCommit(quote.quote_id);
-    sm.processMessage(commit);
-    const dispute = makeDispute(commit.commit_id);
-    sm.processMessage(dispute);
-    sm.markUnfrozen(commit.commit_id);
-    const fulfil = makeFulfil(commit.commit_id);
-    const session = sm.processMessage(fulfil);
-    expect(session.state).toBe('FULFILLED');
-  });
-
-  test('rejects COMMIT directly after INTENT (invalid transition)', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    // Need to provide a valid ref — but since there's no quote, the ref won't resolve
-    // to a session, so we expect UNKNOWN_REF_ID
-    const commit = makeCommit(uuidv4());
-    expect(() => sm.processMessage(commit)).toThrow(BCPError);
-  });
-
-  test('rejects FULFIL in QUOTED state', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    // Fulfil needs a commit_id, but no commit exists — triggers UNKNOWN_REF_ID
-    const fulfil = makeFulfil(uuidv4());
-    expect(() => sm.processMessage(fulfil)).toThrow(BCPError);
-  });
-
-  test('rejects QUOTE for unknown intent_id', () => {
-    const quote = makeQuote(uuidv4());
-    expect(() => sm.processMessage(quote)).toThrow(BCPError);
-  });
-
-  test('tracks messages in session', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const session = sm.getSession(intent.intent_id)!;
-    expect(session.messages).toHaveLength(2);
-    expect(session.messages[0].message_type).toBe('INTENT');
-    expect(session.messages[1].message_type).toBe('QUOTE');
+  test('getSession returns undefined for unknown ID', () => {
+    expect(sm.getSession('nope')).toBeUndefined();
   });
 
   test('getAllSessions returns all sessions', () => {
-    const intent1 = makeIntent();
-    const intent2 = makeIntent();
-    sm.processMessage(intent1);
-    sm.processMessage(intent2);
+    sm.processMessage(makeIntent('s1'));
+    sm.processMessage(makeIntent('s2'));
     expect(sm.getAllSessions()).toHaveLength(2);
-  });
-
-  test('rejects COMMIT against expired quote', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    // Create a quote that already expired
-    const quote = makeQuote(intent.intent_id);
-    quote.offer.validity_until = new Date(Date.now() - 1000).toISOString();
-    sm.processMessage(quote);
-    const commit = makeCommit(quote.quote_id);
-    expect(() => sm.processMessage(commit)).toThrow(BCPError);
-    try {
-      sm.processMessage(makeCommit(quote.quote_id));
-    } catch (e) {
-      expect((e as BCPError).code).toBe(BCPErrorCode.EXPIRED_MESSAGE);
-    }
-  });
-
-  test('rejects COMMIT against expired counter', () => {
-    const intent = makeIntent();
-    sm.processMessage(intent);
-    const quote = makeQuote(intent.intent_id);
-    sm.processMessage(quote);
-    const counter = makeCounter(quote.quote_id);
-    counter.new_validity_until = new Date(Date.now() - 1000).toISOString();
-    sm.processMessage(counter);
-    const commit = makeCommit(counter.counter_id);
-    expect(() => sm.processMessage(commit)).toThrow(BCPError);
   });
 });

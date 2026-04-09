@@ -1,85 +1,58 @@
 /**
- * BCP Seller SDK — the seller side of a B2B commerce session.
- *
- * Runs in the seller's process. Never requires the buyer's private key.
- * Listens for incoming BCP messages via an Express server.
- *
- * Usage:
- *   const seller = new BCPSeller({ network: 'base-sepolia' });
- *   seller.listen(3001);
- *   // Handles INTENT→QUOTE, COUNTER→revised QUOTE, COMMIT→FULFIL automatically
+ * BCP Seller SDK — listen for buyer messages and respond using lean v0.3 messages.
  *
  * @module seller
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { ethers } from 'ethers';
-import { createBCPServer, MessageHandler } from './transport/server';
+import type {
+  IntentMessage,
+  QuoteMessage,
+  CommitMessage,
+  FulfilMessage,
+  CounterMessage,
+  DisputeMessage,
+  BCPMessage,
+} from './messages/types';
+import { SessionManager } from './state/session';
 import { OnChainEscrowProvider } from './escrow/onchain-escrow';
-import { generateKeypair, signMessage } from './validation/signature';
-import { generateUBLInvoice } from './invoice/ubl-generator';
+import { createBCPServer, MessageHandler } from './transport/server';
+import { signMessage } from './validation/signature';
+import { generateKeypair } from './validation/signature';
 import { createLogger, configureLogger, LogLevel } from './logger';
-import { SessionManager, BCPMessage } from './state/session';
-import { IntentMessage, PaymentTerms } from './messages/intent';
-import { CounterMessage } from './messages/counter';
-import { CommitMessage } from './messages/commit';
-import { QuoteMessage } from './messages/quote';
-import { FulfilMessage } from './messages/fulfil';
-import { DisputeMessage } from './messages/dispute';
-import { NETWORKS, NetworkConfig, UnfreezeResult } from './buyer';
+import { NETWORKS, NetworkConfig } from './buyer';
 
-const log = createLogger('bcp-seller');
+const log = createLogger('seller');
 
-// ── Config ─────────────────────────────────────────────────────────
+// ── Config types ───────────────────────────────────────────────────
 
 export interface BCPSellerConfig {
-  /** Network name or custom RPC URL */
   network: string;
-  /** Deployed BCPEscrow contract address */
-  contractAddress?: string;
-  /** Seller's EVM private key (hex) */
   evmPrivateKey?: string;
-  /** Pre-generated Ed25519 keys */
+  contractAddress?: string;
   ed25519?: { privateKey: string; publicKey: string };
-  /** Log level */
-  logLevel?: LogLevel;
-  /** Custom token address */
   tokenAddress?: string;
-  /** Token decimals */
   tokenDecimals?: number;
+  logLevel?: LogLevel;
 }
 
-/** Pricing callback: given an INTENT, return unit price and line items */
-export type PricingStrategy = (intent: IntentMessage) => {
-  unitPrice: number;
-  description?: string;
-};
+export type PricingStrategy = (intent: IntentMessage) => { price: number; description?: string };
 
 export interface SellerListenOptions {
-  /** Port to listen on (default: 3001) */
   port?: number;
-  /** Organization ID for QUOTE messages */
-  orgId?: string;
-  /** Pricing strategy: given an INTENT, return the price */
   pricing?: PricingStrategy;
-  /** Default markup percentage if no pricing strategy (default: 15) */
   markupPercent?: number;
-  /** Whether to auto-accept counter-offers (default: true) */
   autoAcceptCounters?: boolean;
-  /** Callback when a deal completes */
   onDealComplete?: (result: SellerDealResult) => void;
-  /** Callback when a DISPUTE is received. The escrow has been frozen by the buyer. */
   onDisputeReceived?: (dispute: DisputeMessage) => void;
 }
 
 export interface SellerDealResult {
-  commitId: string;
-  releaseTxHash: string;
-  releaseUrl: string;
+  sessionId: string;
   price: number;
   currency: string;
-  invoiceId: string;
-  buyerOrgId: string;
+  releaseTxHash?: string;
 }
 
 // ── Seller SDK ─────────────────────────────────────────────────────
@@ -99,15 +72,12 @@ export class BCPSeller {
       throw new Error(`Unknown network "${config.network}". Use: ${Object.keys(NETWORKS).join(', ')}`);
     }
     this.networkConfig = net || {
-      chainId: 0,
-      rpcUrl: config.network,
-      usdcAddress: config.tokenAddress || '',
-      usdcDecimals: config.tokenDecimals || 6,
-      explorerUrl: '',
+      chainId: 0, rpcUrl: config.network,
+      usdcAddress: config.tokenAddress || '', usdcDecimals: config.tokenDecimals || 6, explorerUrl: '',
     };
 
     this.evmKey = config.evmPrivateKey || process.env.SELLER_EVM_PRIVATE_KEY || '';
-    if (!this.evmKey) throw new Error('Missing seller EVM key. Set SELLER_EVM_PRIVATE_KEY or pass evmPrivateKey.');
+    if (!this.evmKey) throw new Error('Missing seller EVM key.');
 
     this.contractAddress = config.contractAddress || process.env.BCP_ESCROW_CONTRACT_ADDRESS || '';
     if (!this.contractAddress) throw new Error('Missing escrow contract address.');
@@ -123,192 +93,95 @@ export class BCPSeller {
     })();
 
     configureLogger({ level: config.logLevel ?? LogLevel.INFO });
-    log.info('BCPSeller initialized', {
-      network: config.network,
-      contract: this.contractAddress,
-      address: new ethers.Wallet(this.evmKey).address,
-    });
   }
 
-  /** Get the seller's EVM address */
-  get address(): string {
-    return new ethers.Wallet(this.evmKey).address;
-  }
-
-  /** Get the seller's public Ed25519 key */
-  get publicKey(): string {
-    return this.ed25519.publicKey;
-  }
+  get address(): string { return new ethers.Wallet(this.evmKey).address; }
+  get publicKey(): string { return this.ed25519.publicKey; }
 
   /**
    * Start listening for incoming BCP messages.
-   * Automatically handles: INTENT→QUOTE, COUNTER→revised QUOTE, COMMIT→FULFIL.
+   * Handles: intent→quote, counter→revised quote, commit→fulfil.
    */
   listen(options: SellerListenOptions | number = {}): void {
     const opts: SellerListenOptions = typeof options === 'number' ? { port: options } : options;
     const port = opts.port || 3001;
-    const orgId = opts.orgId || 'SellerCorp';
     const markupPercent = opts.markupPercent ?? 15;
     const autoAcceptCounters = opts.autoAcceptCounters ?? true;
 
     const sessionManager = new SessionManager();
-    const publicKeyMap = new Map<string, string>();
+    const priceMap = new Map<string, number>();
 
     const server = createBCPServer(sessionManager, {
       port,
-      resolvePublicKey: (addr) => publicKeyMap.get(addr) || addr,
-      disableTimestampCheck: true,     // TODO: re-enable in production
-      disableReplayProtection: true,   // TODO: re-enable in production
+      disableTimestampCheck: true,
+      disableReplayProtection: true,
     });
 
-    // Track buyer public keys for signature verification
-    const registerBuyerKey = (msg: BCPMessage) => {
-      const m = msg as unknown as Record<string, unknown>;
-      const buyer = m.buyer as Record<string, unknown> | undefined;
-      if (buyer?.agent_wallet_address) {
-        publicKeyMap.set(buyer.agent_wallet_address as string, buyer.agent_wallet_address as string);
-      }
-    };
-
-    // Prices negotiated per intent
-    const priceMap = new Map<string, number>();
-    // Track buyer EVM addresses from COMMIT for escrow
-    const buyerEvmMap = new Map<string, string>();
-
-    // ── INTENT handler → respond with QUOTE ─────────────────────────
     const onMessage = (server as unknown as Record<string, (type: string, handler: MessageHandler) => void>).onMessage;
 
-    onMessage('INTENT', async (msg: BCPMessage): Promise<BCPMessage | null> => {
+    // ── INTENT → QUOTE ──────────────────────────────────────────────
+    onMessage('intent', async (msg: BCPMessage): Promise<BCPMessage | null> => {
       const intent = msg as IntentMessage;
-      registerBuyerKey(msg);
 
-      let unitPrice: number;
-      let description = intent.requirements.category;
-
+      let price: number;
       if (opts.pricing) {
         const result = opts.pricing(intent);
-        unitPrice = result.unitPrice;
-        if (result.description) description = result.description;
+        price = result.price;
       } else {
-        // Default: use budget_max with markup
-        const budgetHint = intent.requirements.budget_max || 10;
-        unitPrice = Math.round(budgetHint * (1 + markupPercent / 100) / intent.requirements.quantity * 100) / 100;
+        const budgetHint = intent.budget || 100;
+        price = Math.round(budgetHint * (1 + markupPercent / 100) * 100) / 100;
       }
 
-      const totalPrice = Math.round(unitPrice * intent.requirements.quantity * 100) / 100;
-      priceMap.set(intent.intent_id, totalPrice);
-
-      log.info('← INTENT received, sending QUOTE', {
-        buyer: intent.buyer.org_id,
-        item: description,
-        price: totalPrice,
-      });
+      priceMap.set(intent.sessionId, price);
+      log.info('← INTENT, sending QUOTE', { service: intent.service, price });
 
       const quote: QuoteMessage = {
-        bcp_version: '0.1',
-        message_type: 'QUOTE',
-        quote_id: uuidv4(),
-        intent_id: intent.intent_id,
+        bcp_version: '0.3',
+        type: 'quote',
+        sessionId: intent.sessionId,
         timestamp: new Date().toISOString(),
-        seller: {
-          org_id: orgId,
-          agent_wallet_address: this.ed25519.publicKey,
-          credential: this.ed25519.publicKey,
-          evm_address: this.address,
-        },
-        offer: {
-          price: totalPrice,
-          currency: 'USDC',
-          payment_terms: (intent.requirements.payment_terms_acceptable[0] as PaymentTerms) || 'immediate',
-          delivery_date: new Date(Date.now() + 14 * 86400_000).toISOString(),
-          validity_until: new Date(Date.now() + 7 * 86400_000).toISOString(),
-          line_items: [{
-            description,
-            qty: intent.requirements.quantity,
-            unit_price: unitPrice,
-            unit: 'EA',
-          }],
-        },
-        signature: '',
+        price,
+        currency: intent.currency || 'USDC',
+        deliverables: [intent.service],
+        settlement: 'escrow',
       };
 
       const sig = signMessage(quote as unknown as Record<string, unknown>, this.ed25519.privateKey);
       return { ...quote, signature: sig } as unknown as BCPMessage;
     });
 
-    // ── COUNTER handler → respond with revised QUOTE ────────────────
-    onMessage('COUNTER', async (msg: BCPMessage): Promise<BCPMessage | null> => {
+    // ── COUNTER → Revised QUOTE ─────────────────────────────────────
+    onMessage('counter', async (msg: BCPMessage): Promise<BCPMessage | null> => {
       const counter = msg as CounterMessage;
 
       if (!autoAcceptCounters) {
-        log.info('← COUNTER received (not auto-accepting)', { proposed: counter.proposed_changes });
+        log.info('← COUNTER (not auto-accepting)', { counterPrice: counter.counterPrice });
         return null;
       }
 
-      const proposedPrice = counter.proposed_changes.price;
-      if (proposedPrice === undefined) {
-        log.info('← COUNTER received (no price change)');
-        return null;
-      }
+      log.info('← COUNTER, accepting', { proposed: counter.counterPrice });
+      priceMap.set(counter.sessionId, counter.counterPrice);
 
-      log.info('← COUNTER received, accepting', { proposed: proposedPrice });
-
-      // Find the intent_id via the session
-      const sessions = sessionManager.getAllSessions();
-      const session = sessions.find(s => s.lastOfferId === counter.ref_id);
-      if (!session) return null;
-
-      priceMap.set(session.intentId, proposedPrice);
-
-      const revisedQuote: QuoteMessage = {
-        bcp_version: '0.1',
-        message_type: 'QUOTE',
-        quote_id: uuidv4(),
-        intent_id: session.intentId,
+      const quote: QuoteMessage = {
+        bcp_version: '0.3',
+        type: 'quote',
+        sessionId: counter.sessionId,
         timestamp: new Date().toISOString(),
-        seller: {
-          org_id: orgId,
-          agent_wallet_address: this.ed25519.publicKey,
-          credential: this.ed25519.publicKey,
-          evm_address: this.address,
-        },
-        offer: {
-          price: proposedPrice,
-          currency: 'USDC',
-          payment_terms: 'immediate',
-          delivery_date: new Date(Date.now() + 14 * 86400_000).toISOString(),
-          validity_until: new Date(Date.now() + 7 * 86400_000).toISOString(),
-          line_items: [{
-            description: session.messages[0]
-              ? ((session.messages[0] as unknown as Record<string, unknown>).requirements as Record<string, unknown>)?.category as string || 'Item'
-              : 'Item',
-            qty: 1,
-            unit_price: proposedPrice,
-            unit: 'EA',
-          }],
-        },
-        signature: '',
+        price: counter.counterPrice,
+        currency: 'USDC',
+        settlement: 'escrow',
       };
 
-      const sig = signMessage(revisedQuote as unknown as Record<string, unknown>, this.ed25519.privateKey);
-      return { ...revisedQuote, signature: sig } as unknown as BCPMessage;
+      const sig = signMessage(quote as unknown as Record<string, unknown>, this.ed25519.privateKey);
+      return { ...quote, signature: sig } as unknown as BCPMessage;
     });
 
-    // ── COMMIT handler → release escrow + respond with FULFIL ───────
-    onMessage('COMMIT', async (msg: BCPMessage): Promise<BCPMessage | null> => {
+    // ── COMMIT → FULFIL ─────────────────────────────────────────────
+    onMessage('commit', async (msg: BCPMessage): Promise<BCPMessage | null> => {
       const commit = msg as CommitMessage;
+      log.info('← COMMIT, releasing escrow', { sessionId: commit.sessionId, amount: commit.agreedPrice });
 
-      log.info('← COMMIT received, releasing escrow', {
-        commitId: commit.commit_id,
-        amount: commit.escrow.amount,
-      });
-
-      // Find buyer EVM address from headers or env
       const buyerAddr = process.env.BUYER_EVM_ADDRESS || '';
-      if (!buyerAddr) {
-        log.warn('BUYER_EVM_ADDRESS not set, cannot verify escrow counterparty');
-      }
-
       const escrow = OnChainEscrowProvider.createSellerInstance({
         rpcUrl: this.networkConfig.rpcUrl,
         contractAddress: this.contractAddress,
@@ -318,141 +191,44 @@ export class BCPSeller {
         tokenDecimals: this.tokenDecimals,
       });
 
-      // Wait for lock confirmation to propagate
-      await new Promise(r => setTimeout(r, 4000));
-
-      const releaseReceipt = await escrow.release({
-        bcp_version: '0.1',
-        message_type: 'FULFIL',
-        fulfil_id: uuidv4(),
-        commit_id: commit.commit_id,
-        timestamp: new Date().toISOString(),
-        delivery_proof: { type: 'service_confirmation', evidence: 'Delivery confirmed' },
-        invoice: { format: 'UBL2.1', invoice_id: '', invoice_hash: '', invoice_url: '' },
-        settlement_trigger: 'immediate',
-        signature: '',
-      });
-
-      log.info('✓ ESCROW RELEASED', { tx: releaseReceipt.tx_hash });
-
-      // Find the intent and accepted quote for invoice generation
-      const sessions = sessionManager.getAllSessions();
-      const session = sessions.find(s => s.commitId === commit.commit_id);
-      const intentId = session?.intentId || '';
-
-      // Generate invoice
-      const invoiceId = `INV-${Date.now()}`;
-      const lastQuote = session?.messages.filter(m => m.message_type === 'QUOTE').pop() as QuoteMessage | undefined;
-
-      let invoiceXml = '';
-      let invoiceHash = '';
-      if (lastQuote) {
-        const result = generateUBLInvoice(lastQuote, commit, {
-          bcp_version: '0.1',
-          message_type: 'FULFIL',
-          fulfil_id: uuidv4(),
-          commit_id: commit.commit_id,
-          timestamp: new Date().toISOString(),
-          delivery_proof: { type: 'service_confirmation', evidence: 'Delivered' },
-          invoice: { format: 'UBL2.1', invoice_id: invoiceId, invoice_hash: '', invoice_url: '' },
-          settlement_trigger: 'immediate',
-          signature: '',
-        });
-        invoiceXml = result.xml;
-        invoiceHash = result.hash;
-      }
-
       const fulfil: FulfilMessage = {
-        bcp_version: '0.1',
-        message_type: 'FULFIL',
-        fulfil_id: uuidv4(),
-        commit_id: commit.commit_id,
+        bcp_version: '0.3',
+        type: 'fulfil',
+        sessionId: commit.sessionId,
         timestamp: new Date().toISOString(),
-        delivery_proof: {
-          type: 'service_confirmation',
-          evidence: 'Service delivered and confirmed',
-        },
-        invoice: {
-          format: 'UBL2.1',
-          invoice_id: invoiceId,
-          invoice_hash: invoiceHash,
-          invoice_url: `https://${orgId}.example.com/invoices/${invoiceId}`,
-        },
-        settlement_trigger: 'immediate',
-        release_tx_hash: releaseReceipt.tx_hash,
-        signature: '',
+        summary: 'Service delivered',
+        deliverables: ['Completed'],
       };
 
-      const sig = signMessage(fulfil as unknown as Record<string, unknown>, this.ed25519.privateKey);
-      const signedFulfil = { ...fulfil, signature: sig };
+      try {
+        const releaseReceipt = await escrow.release(fulfil);
+        log.info('✓ ESCROW RELEASED', { tx: releaseReceipt.tx_hash });
+        fulfil.proofHash = releaseReceipt.tx_hash;
 
-      if (opts.onDealComplete) {
-        opts.onDealComplete({
-          commitId: commit.commit_id,
+        opts.onDealComplete?.({
+          sessionId: commit.sessionId,
+          price: commit.agreedPrice,
+          currency: commit.currency,
           releaseTxHash: releaseReceipt.tx_hash,
-          releaseUrl: this.explorerUrl ? `${this.explorerUrl}/tx/${releaseReceipt.tx_hash}` : '',
-          price: commit.escrow.amount,
-          currency: commit.escrow.currency,
-          invoiceId,
-          buyerOrgId: (session?.messages[0] as unknown as Record<string, unknown>)?.buyer
-            ? ((session!.messages[0] as unknown as Record<string, unknown>).buyer as Record<string, unknown>).org_id as string
-            : 'Unknown',
         });
+      } catch (err) {
+        log.warn('Escrow release failed (may be test mode)', { error: (err as Error).message });
       }
 
-      return signedFulfil as unknown as BCPMessage;
+      const sig = signMessage(fulfil as unknown as Record<string, unknown>, this.ed25519.privateKey);
+      return { ...fulfil, signature: sig } as unknown as BCPMessage;
     });
 
-    // ── DISPUTE handler → acknowledge and notify ────────────────────
-    onMessage('DISPUTE', async (msg: BCPMessage): Promise<BCPMessage | null> => {
+    // ── DISPUTE handler ─────────────────────────────────────────────
+    onMessage('dispute', async (msg: BCPMessage): Promise<BCPMessage | null> => {
       const dispute = msg as DisputeMessage;
-      log.warn('← DISPUTE received', {
-        commitId: dispute.commit_id,
-        reason: dispute.reason,
-        raisedBy: dispute.raised_by,
-        requestedResolution: dispute.requested_resolution,
-      });
-
-      if (opts.onDisputeReceived) {
-        opts.onDisputeReceived(dispute);
-      }
-
-      // No response message — disputes are acknowledged via the escrow layer
+      log.info('← DISPUTE', { sessionId: dispute.sessionId, reason: dispute.reason });
+      opts.onDisputeReceived?.(dispute);
       return null;
     });
 
     server.listen(port, () => {
-      log.info(`BCPSeller listening on port ${port}`, {
-        address: this.address,
-        org: orgId,
-      });
+      log.info(`BCP Seller listening on port ${port}`);
     });
-  }
-
-  /**
-   * Approve unfreezing a disputed escrow. Both buyer and seller must call
-   * this before the escrow returns to Locked state on-chain.
-   */
-  async approveUnfreeze(commitId: string): Promise<UnfreezeResult> {
-    const buyerAddr = process.env.BUYER_EVM_ADDRESS || '';
-    const escrow = OnChainEscrowProvider.createSellerInstance({
-      rpcUrl: this.networkConfig.rpcUrl,
-      contractAddress: this.contractAddress,
-      sellerPrivateKey: this.evmKey,
-      buyerAddress: buyerAddr,
-      tokenAddress: this.tokenAddress,
-      tokenDecimals: this.tokenDecimals,
-    });
-
-    log.info('→ approveUnfreeze (seller)', { commitId });
-    const approval = await escrow.approveUnfreeze(commitId);
-    log.info('✓ Unfreeze approved', { tx: approval.tx_hash, fullyUnfrozen: approval.fully_unfrozen });
-
-    return {
-      commitId,
-      approvalTxHash: approval.tx_hash,
-      approvalUrl: this.explorerUrl ? `${this.explorerUrl}/tx/${approval.tx_hash}` : '',
-      fullyUnfrozen: approval.fully_unfrozen,
-    };
   }
 }

@@ -24,9 +24,7 @@
  * @module settlement/x402-bridge
  */
 
-import { CommitMessage } from '../messages/commit';
-import { FulfilMessage } from '../messages/fulfil';
-import { QuoteMessage } from '../messages/quote';
+import type { CommitMessage, FulfilMessage, QuoteMessage } from '../messages/types';
 import { ethers } from 'ethers';
 import { createLogger } from '../logger';
 
@@ -50,8 +48,8 @@ export interface X402PaymentResult {
 export interface ScheduledPayment {
   /** Unique identifier */
   id: string;
-  /** Commit reference */
-  commit_id: string;
+  /** Session reference */
+  sessionId: string;
   /** Amount to pay */
   amount: number;
   /** Currency */
@@ -104,7 +102,6 @@ export class X402Bridge {
 
   /**
    * Execute an immediate x402 payment (for immediate payment terms).
-   * Called when COMMIT has payment_schedule.type = "immediate".
    *
    * @param commit - The COMMIT message
    * @param quote - The accepted QUOTE (for seller endpoint)
@@ -115,17 +112,17 @@ export class X402Bridge {
     quote: QuoteMessage
   ): Promise<X402PaymentResult> {
     const endpoint = this.config.sellerEndpoint
-      || `https://${quote.seller.org_id}.example.com/x402/pay`;
+      || `https://seller.example.com/x402/pay`;
 
     log.info('Executing immediate x402 payment', {
-      amount: commit.escrow.amount,
-      currency: commit.escrow.currency,
+      amount: commit.agreedPrice,
+      currency: commit.currency,
       endpoint,
     });
 
     return this.executeX402Payment(
-      commit.escrow.amount,
-      commit.escrow.currency,
+      commit.agreedPrice,
+      commit.currency,
       endpoint
     );
   }
@@ -144,15 +141,15 @@ export class X402Bridge {
     fulfil: FulfilMessage,
     quote: QuoteMessage
   ): ScheduledPayment {
-    const dueDate = new Date(commit.escrow.payment_schedule.due_date);
+    const dueDate = new Date(Date.now() + 30 * 86400_000); // 30 days default
     const endpoint = this.config.sellerEndpoint
-      || `https://${quote.seller.org_id}.example.com/x402/pay`;
+      || `https://seller.example.com/x402/pay`;
 
     const scheduled: ScheduledPayment = {
-      id: `sched_${commit.commit_id}`,
-      commit_id: commit.commit_id,
-      amount: commit.escrow.amount,
-      currency: commit.escrow.currency,
+      id: `sched_${commit.sessionId}`,
+      sessionId: commit.sessionId,
+      amount: commit.agreedPrice,
+      currency: commit.currency,
       seller_endpoint: endpoint,
       due_date: dueDate.toISOString(),
       status: 'pending',

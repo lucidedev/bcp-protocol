@@ -1,116 +1,22 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://bcp-protocol.org/schemas/intent.schema.json",
-  "title": "BCP INTENT Message",
-  "description": "Buyer agent declares a procurement need",
+  "title": "BCP Intent Message",
   "type": "object",
-  "required": [
-    "bcp_version",
-    "message_type",
-    "intent_id",
-    "timestamp",
-    "buyer",
-    "requirements",
-    "ttl",
-    "signature"
-  ],
-  "additionalProperties": false,
+  "required": ["bcp_version", "type", "sessionId", "timestamp", "service"],
   "properties": {
-    "bcp_version": {
-      "type": "string",
-      "const": "0.1"
-    },
-    "message_type": {
-      "type": "string",
-      "const": "INTENT"
-    },
-    "intent_id": {
-      "type": "string",
-      "format": "uuid",
-      "description": "UUID v4 unique identifier for this intent"
-    },
-    "timestamp": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp"
-    },
-    "buyer": {
-      "type": "object",
-      "required": ["org_id", "agent_wallet_address", "credential", "spending_limit", "currency"],
-      "additionalProperties": false,
-      "properties": {
-        "org_id": {
-          "type": "string",
-          "description": "Unique identifier for the buyer organization"
-        },
-        "agent_wallet_address": {
-          "type": "string",
-          "description": "Buyer agent's wallet address (0x-prefixed hex for EVM)"
-        },
-        "credential": {
-          "type": "string",
-          "description": "Verifiable credential or public key for the buyer agent"
-        },
-        "spending_limit": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Maximum amount the buyer agent is authorized to spend"
-        },
-        "currency": {
-          "type": "string",
-          "description": "Currency code (e.g. USDC, USDT)"
-        }
-      }
-    },
-    "requirements": {
-      "type": "object",
-      "required": ["category", "quantity", "delivery_window", "budget_max", "payment_terms_acceptable"],
-      "additionalProperties": false,
-      "properties": {
-        "category": {
-          "type": "string",
-          "description": "Procurement category or product/service type"
-        },
-        "quantity": {
-          "type": "number",
-          "minimum": 1,
-          "description": "Quantity required"
-        },
-        "delivery_window": {
-          "type": "string",
-          "description": "Desired delivery window as ISO 8601 duration or date range"
-        },
-        "budget_max": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Maximum budget for this procurement"
-        },
-        "payment_terms_acceptable": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["immediate", "net15", "net30", "net45", "net60", "net90"]
-          },
-          "minItems": 1,
-          "description": "Payment terms the buyer is willing to accept"
-        },
-        "compliance": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Compliance requirements (e.g. ISO certifications, regulatory standards)"
-        }
-      }
-    },
-    "ttl": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Time to live in seconds — intent expires after this duration"
-    },
-    "signature": {
-      "type": "string",
-      "description": "Ed25519 signature of the canonical JSON payload (excluding signature field)"
-    }
-  }
+    "bcp_version": { "const": "0.3" },
+    "type": { "const": "intent" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "service": { "type": "string", "minLength": 1 },
+    "budget": { "type": "number", "minimum": 0 },
+    "currency": { "type": "string" },
+    "auth": { "type": "string", "enum": ["none", "platform", "ed25519", "did"] },
+    "rfqId": { "type": "string" },
+    "agentUrl": { "type": "string", "format": "uri" },
+    "callbackUrl": { "type": "string", "format": "uri" },
+    "signature": { "type": "string" },
+    "did": { "type": "string" }
+  },
+  "additionalProperties": false
 }

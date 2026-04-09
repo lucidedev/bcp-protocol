@@ -134,7 +134,7 @@ function Hero() {
           className="inline-flex items-center gap-2 border border-zinc-200 bg-white rounded-full px-3.5 py-1 text-xs text-zinc-500 mb-8 font-medium shadow-sm"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          Open Source · Apache 2.0 · v0.2
+          Open Source · Apache 2.0 · v0.3
         </motion.div>
 
         {/* Headline */}
@@ -1013,7 +1013,7 @@ function CTASection() {
             View on GitHub
           </a>
           <a
-            href="https://github.com/lucidedev/bcp-protocol/blob/main/spec/SPEC-v0.2.md"
+            href="https://github.com/lucidedev/bcp-protocol/blob/main/spec/ERC-BCP.md"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 border border-zinc-200 hover:border-zinc-300 bg-white text-zinc-700 font-medium px-5 py-2.5 rounded-lg transition-all text-sm"
@@ -1053,7 +1053,7 @@ function Footer() {
             GitHub
           </a>
           <span className="w-1 h-1 rounded-full bg-zinc-300" />
-          <span className="font-mono">v0.2.0</span>
+          <span className="font-mono">v0.3.0</span>
         </div>
       </div>
     </footer>

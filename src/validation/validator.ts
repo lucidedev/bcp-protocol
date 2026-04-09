@@ -11,46 +11,38 @@ import quoteSchema from '../../spec/schemas/quote.schema.json';
 import counterSchema from '../../spec/schemas/counter.schema.json';
 import commitSchema from '../../spec/schemas/commit.schema.json';
 import fulfilSchema from '../../spec/schemas/fulfil.schema.json';
+import acceptSchema from '../../spec/schemas/accept.schema.json';
 import disputeSchema from '../../spec/schemas/dispute.schema.json';
 
 /** Structured validation error with field path */
 export interface ValidationError {
-  /** JSON pointer path to the invalid field */
   path: string;
-  /** Human-readable error message */
   message: string;
-  /** Schema keyword that failed (e.g. "required", "type", "enum") */
   keyword: string;
 }
 
 /** Validation result */
 export interface ValidationResult {
-  /** Whether the message is valid */
   valid: boolean;
-  /** Validation errors (empty if valid) */
   errors: ValidationError[];
 }
 
 /** BCP message types */
-export type BCPMessageType = 'INTENT' | 'QUOTE' | 'COUNTER' | 'COMMIT' | 'FULFIL' | 'DISPUTE';
+export type BCPMessageType = 'intent' | 'quote' | 'counter' | 'commit' | 'fulfil' | 'accept' | 'dispute';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 addFormats(ajv);
 
 const validators: Record<BCPMessageType, ReturnType<typeof ajv.compile>> = {
-  INTENT: ajv.compile(intentSchema),
-  QUOTE: ajv.compile(quoteSchema),
-  COUNTER: ajv.compile(counterSchema),
-  COMMIT: ajv.compile(commitSchema),
-  FULFIL: ajv.compile(fulfilSchema),
-  DISPUTE: ajv.compile(disputeSchema),
+  intent: ajv.compile(intentSchema),
+  quote: ajv.compile(quoteSchema),
+  counter: ajv.compile(counterSchema),
+  commit: ajv.compile(commitSchema),
+  fulfil: ajv.compile(fulfilSchema),
+  accept: ajv.compile(acceptSchema),
+  dispute: ajv.compile(disputeSchema),
 };
 
-/**
- * Convert ajv errors to structured ValidationError array.
- * @param errors - Raw ajv error objects
- * @returns Structured validation errors
- */
 function formatErrors(errors: ErrorObject[] | null | undefined): ValidationError[] {
   if (!errors) return [];
   return errors.map((err) => ({
@@ -62,18 +54,16 @@ function formatErrors(errors: ErrorObject[] | null | undefined): ValidationError
 
 /**
  * Validate a BCP message against its JSON schema.
- * @param message - The message object to validate
- * @returns Validation result with structured errors
  */
 export function validateMessage(message: Record<string, unknown>): ValidationResult {
-  const messageType = message.message_type as BCPMessageType | undefined;
+  const messageType = message.type as BCPMessageType | undefined;
 
   if (!messageType || !validators[messageType]) {
     return {
       valid: false,
       errors: [{
-        path: '/message_type',
-        message: `Unknown or missing message_type: ${messageType}`,
+        path: '/type',
+        message: `Unknown or missing type: ${messageType}`,
         keyword: 'enum',
       }],
     };
@@ -90,9 +80,6 @@ export function validateMessage(message: Record<string, unknown>): ValidationRes
 
 /**
  * Validate a BCP message of a known type.
- * @param messageType - The expected message type
- * @param message - The message object to validate
- * @returns Validation result with structured errors
  */
 export function validateMessageType(
   messageType: BCPMessageType,
@@ -102,12 +89,9 @@ export function validateMessageType(
   if (!validate) {
     return {
       valid: false,
-      errors: [{ path: '/', message: `No schema for type: ${messageType}`, keyword: 'enum' }],
+      errors: [{ path: '/type', message: `Unknown type: ${messageType}`, keyword: 'enum' }],
     };
   }
   const valid = validate(message) as boolean;
-  return {
-    valid,
-    errors: valid ? [] : formatErrors(validate.errors),
-  };
+  return { valid, errors: valid ? [] : formatErrors(validate.errors) };
 }

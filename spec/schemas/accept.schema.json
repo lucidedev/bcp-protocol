@@ -1,17 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "BCP Fulfil Message",
+  "title": "BCP Accept Message",
   "type": "object",
   "required": ["bcp_version", "type", "sessionId", "timestamp"],
   "properties": {
     "bcp_version": { "const": "0.3" },
-    "type": { "const": "fulfil" },
+    "type": { "const": "accept" },
     "sessionId": { "type": "string", "minLength": 1 },
     "timestamp": { "type": "string", "format": "date-time" },
-    "deliverables": { "type": "array", "items": { "type": "string" } },
-    "summary": { "type": "string" },
-    "proofHash": { "type": "string" },
-    "invoiceUrl": { "type": "string", "format": "uri" },
+    "fulfilHash": { "type": "string" },
+    "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "feedback": { "type": "string" },
     "callbackUrl": { "type": "string", "format": "uri" },
     "signature": { "type": "string" },
     "did": { "type": "string" }

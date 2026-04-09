@@ -28,9 +28,9 @@ describe('Ed25519 signature', () => {
 
   test('signMessage produces a hex signature', () => {
     const message = {
-      bcp_version: '0.1',
-      message_type: 'INTENT',
-      intent_id: 'test-id',
+      bcp_version: '0.3',
+      type: 'intent',
+      sessionId: 'test-id',
       timestamp: '2026-01-01T00:00:00Z',
     };
     const sig = signMessage(message, keys.privateKey);
@@ -40,9 +40,9 @@ describe('Ed25519 signature', () => {
 
   test('verifyMessage confirms valid signature', () => {
     const message: Record<string, unknown> = {
-      bcp_version: '0.1',
-      message_type: 'INTENT',
-      intent_id: 'test-id',
+      bcp_version: '0.3',
+      type: 'intent',
+      sessionId: 'test-id',
       timestamp: '2026-01-01T00:00:00Z',
     };
     const sig = signMessage(message, keys.privateKey);
@@ -52,23 +52,23 @@ describe('Ed25519 signature', () => {
 
   test('verifyMessage rejects tampered message', () => {
     const message: Record<string, unknown> = {
-      bcp_version: '0.1',
-      message_type: 'INTENT',
-      intent_id: 'test-id',
+      bcp_version: '0.3',
+      type: 'intent',
+      sessionId: 'test-id',
       timestamp: '2026-01-01T00:00:00Z',
     };
     const sig = signMessage(message, keys.privateKey);
     message.signature = sig;
-    message.intent_id = 'tampered-id'; // Tamper!
+    message.sessionId = 'tampered-id'; // Tamper!
     expect(verifyMessage(message, keys.publicKey)).toBe(false);
   });
 
   test('verifyMessage rejects wrong public key', () => {
     const otherKeys = generateKeypair();
     const message: Record<string, unknown> = {
-      bcp_version: '0.1',
-      message_type: 'INTENT',
-      intent_id: 'test-id',
+      bcp_version: '0.3',
+      type: 'intent',
+      sessionId: 'test-id',
       timestamp: '2026-01-01T00:00:00Z',
     };
     const sig = signMessage(message, keys.privateKey);
@@ -78,8 +78,8 @@ describe('Ed25519 signature', () => {
 
   test('verifyMessage rejects missing signature', () => {
     const message: Record<string, unknown> = {
-      bcp_version: '0.1',
-      message_type: 'INTENT',
+      bcp_version: '0.3',
+      type: 'intent',
     };
     expect(verifyMessage(message, keys.publicKey)).toBe(false);
   });

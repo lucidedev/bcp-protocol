@@ -1,234 +1,214 @@
 /**
- * Tests for BCP message creation and validation.
+ * BCP message validation tests — lean v0.3 message types.
  */
 
-import { v4 as uuidv4 } from 'uuid';
-import { validateMessage, ValidationResult } from '../src/validation/validator';
-import { IntentMessage } from '../src/messages/intent';
-import { QuoteMessage } from '../src/messages/quote';
-import { CounterMessage } from '../src/messages/counter';
-import { CommitMessage } from '../src/messages/commit';
-import { FulfilMessage } from '../src/messages/fulfil';
-import { DisputeMessage } from '../src/messages/dispute';
+import { validateMessage, validateMessageType } from '../src/validation/validator';
 
-function makeIntent(overrides: Partial<IntentMessage> = {}): IntentMessage {
-  return {
-    bcp_version: '0.1',
-    message_type: 'INTENT',
-    intent_id: uuidv4(),
-    timestamp: new Date().toISOString(),
-    buyer: {
-      org_id: 'test-org',
-      agent_wallet_address: '0x' + 'a'.repeat(64),
-      credential: '0x' + 'b'.repeat(64),
-      spending_limit: 50000,
-      currency: 'USDC',
-    },
-    requirements: {
-      category: 'Cloud Services',
-      quantity: 10,
-      delivery_window: 'P14D',
-      budget_max: 50000,
-      payment_terms_acceptable: ['immediate', 'net30'],
-      compliance: ['ISO27001'],
-    },
-    ttl: 3600,
-    signature: 'a'.repeat(128),
-    ...overrides,
-  };
-}
-
-function makeQuote(intentId: string, overrides: Partial<QuoteMessage> = {}): QuoteMessage {
-  return {
-    bcp_version: '0.1',
-    message_type: 'QUOTE',
-    quote_id: uuidv4(),
-    intent_id: intentId,
-    timestamp: new Date().toISOString(),
-    seller: {
-      org_id: 'seller-org',
-      agent_wallet_address: '0x' + 'c'.repeat(64),
-      credential: '0x' + 'd'.repeat(64),
-    },
-    offer: {
-      price: 45000,
-      currency: 'USDC',
-      payment_terms: 'net30',
-      delivery_date: new Date(Date.now() + 14 * 86400_000).toISOString(),
-      validity_until: new Date(Date.now() + 7 * 86400_000).toISOString(),
-      line_items: [
-        { description: 'GPU Instance', qty: 10, unit_price: 4500, unit: 'EA' },
-      ],
-    },
-    signature: 'a'.repeat(128),
-    ...overrides,
-  };
-}
-
-describe('INTENT message validation', () => {
-  test('valid INTENT passes validation', () => {
-    const result: ValidationResult = validateMessage(makeIntent() as unknown as Record<string, unknown>);
+describe('v0.3 message validation', () => {
+  test('valid INTENT message', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'intent',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      service: 'Logo design',
+    });
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
-  test('missing required field fails validation', () => {
-    const msg = makeIntent();
-    delete (msg as any).intent_id;
-    const result = validateMessage(msg as unknown as Record<string, unknown>);
-    expect(result.valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThan(0);
-  });
-
-  test('invalid payment_terms_acceptable fails validation', () => {
-    const msg = makeIntent();
-    msg.requirements.payment_terms_acceptable = ['invalid_term' as any];
-    const result = validateMessage(msg as unknown as Record<string, unknown>);
-    expect(result.valid).toBe(false);
-  });
-
-  test('invalid bcp_version fails validation', () => {
-    const msg = makeIntent({ bcp_version: '9.9' as any });
-    const result = validateMessage(msg as unknown as Record<string, unknown>);
-    expect(result.valid).toBe(false);
-  });
-});
-
-describe('QUOTE message validation', () => {
-  test('valid QUOTE passes validation', () => {
-    const result = validateMessage(makeQuote(uuidv4()) as unknown as Record<string, unknown>);
+  test('valid INTENT with all optional fields', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'intent',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      service: 'Logo design',
+      budget: 500,
+      currency: 'USDC',
+      auth: 'ed25519',
+      rfqId: 'rfq-1',
+      did: 'did:key:z6Mk...',
+    });
     expect(result.valid).toBe(true);
   });
 
-  test('QUOTE with early_pay_discount passes', () => {
-    const quote = makeQuote(uuidv4());
-    quote.offer.early_pay_discount = { discount_percent: 2, if_paid_within_days: 10 };
-    const result = validateMessage(quote as unknown as Record<string, unknown>);
-    expect(result.valid).toBe(true);
+  test('rejects INTENT with missing service', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'intent',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.message.includes('service'))).toBe(true);
   });
 
-  test('QUOTE with empty line_items fails', () => {
-    const quote = makeQuote(uuidv4());
-    quote.offer.line_items = [];
-    const result = validateMessage(quote as unknown as Record<string, unknown>);
+  test('rejects unknown message type', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'UNKNOWN',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+    });
     expect(result.valid).toBe(false);
   });
-});
 
-describe('COUNTER message validation', () => {
-  test('valid COUNTER passes validation', () => {
-    const counter: CounterMessage = {
-      bcp_version: '0.1',
-      message_type: 'COUNTER',
-      counter_id: uuidv4(),
-      ref_id: uuidv4(),
-      initiated_by: 'buyer',
+  test('valid QUOTE message', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'quote',
+      sessionId: 'sess-1',
       timestamp: new Date().toISOString(),
-      proposed_changes: { price: 40000 },
-      new_validity_until: new Date(Date.now() + 3600_000).toISOString(),
-      signature: 'a'.repeat(128),
-    };
-    const result = validateMessage(counter as unknown as Record<string, unknown>);
-    expect(result.valid).toBe(true);
-  });
-});
-
-describe('COMMIT message validation', () => {
-  test('valid COMMIT passes validation', () => {
-    const commit: CommitMessage = {
-      bcp_version: '0.1',
-      message_type: 'COMMIT',
-      commit_id: uuidv4(),
-      accepted_ref_id: uuidv4(),
-      timestamp: new Date().toISOString(),
-      buyer_approval: {
-        approved_by: '0x' + 'a'.repeat(64),
-        approval_type: 'autonomous',
-        threshold_exceeded: false,
-      },
-      escrow: {
-        amount: 45000,
-        currency: 'USDC',
-        escrow_contract_address: '0x' + 'e'.repeat(40),
-        release_condition: 'fulfil_confirmed',
-        payment_schedule: {
-          type: 'net30',
-          due_date: new Date(Date.now() + 30 * 86400_000).toISOString(),
-        },
-      },
-      signature: 'a'.repeat(128),
-    };
-    const result = validateMessage(commit as unknown as Record<string, unknown>);
-    expect(result.valid).toBe(true);
-  });
-});
-
-describe('FULFIL message validation', () => {
-  test('valid FULFIL passes validation', () => {
-    const fulfil: FulfilMessage = {
-      bcp_version: '0.1',
-      message_type: 'FULFIL',
-      fulfil_id: uuidv4(),
-      commit_id: uuidv4(),
-      timestamp: new Date().toISOString(),
-      delivery_proof: {
-        type: 'service_confirmation',
-        evidence: 'Delivery confirmed',
-      },
-      invoice: {
-        format: 'UBL2.1',
-        invoice_id: 'INV-001',
-        invoice_hash: 'a'.repeat(64),
-        invoice_url: 'https://example.com/invoice/INV-001',
-      },
-      settlement_trigger: 'immediate',
-      signature: 'a'.repeat(128),
-    };
-    const result = validateMessage(fulfil as unknown as Record<string, unknown>);
-    expect(result.valid).toBe(true);
-  });
-});
-
-describe('DISPUTE message validation', () => {
-  test('valid DISPUTE passes validation', () => {
-    const dispute: DisputeMessage = {
-      bcp_version: '0.1',
-      message_type: 'DISPUTE',
-      dispute_id: uuidv4(),
-      commit_id: uuidv4(),
-      timestamp: new Date().toISOString(),
-      raised_by: 'buyer',
-      reason: 'non_delivery',
-      requested_resolution: 'full_refund',
-      signature: 'a'.repeat(128),
-    };
-    const result = validateMessage(dispute as unknown as Record<string, unknown>);
+      price: 250,
+      currency: 'USDC',
+    });
     expect(result.valid).toBe(true);
   });
 
-  test('DISPUTE with optional evidence fields passes', () => {
-    const dispute: DisputeMessage = {
-      bcp_version: '0.1',
-      message_type: 'DISPUTE',
-      dispute_id: uuidv4(),
-      commit_id: uuidv4(),
+  test('valid QUOTE with deliverables', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'quote',
+      sessionId: 'sess-1',
       timestamp: new Date().toISOString(),
-      raised_by: 'seller',
-      reason: 'payment_failure',
-      evidence_hash: 'b'.repeat(64),
-      evidence_url: 'https://example.com/evidence',
-      requested_resolution: 'negotiate',
-      signature: 'a'.repeat(128),
-    };
-    const result = validateMessage(dispute as unknown as Record<string, unknown>);
+      price: 250,
+      currency: 'USDC',
+      deliverables: ['Logo file', 'Brand guidelines'],
+      estimatedDays: 7,
+      settlement: 'escrow',
+    });
     expect(result.valid).toBe(true);
   });
-});
 
-describe('unknown message type', () => {
-  test('rejects unknown message_type', () => {
-    const result = validateMessage({ message_type: 'UNKNOWN', bcp_version: '0.1' });
+  test('rejects QUOTE with missing price', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'quote',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      currency: 'USDC',
+    });
     expect(result.valid).toBe(false);
-    expect(result.errors[0].path).toBe('/message_type');
+  });
+
+  test('valid COUNTER message', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'counter',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      counterPrice: 200,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  test('valid COMMIT message', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'commit',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      agreedPrice: 200,
+      currency: 'USDC',
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  test('valid COMMIT with escrow', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'commit',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      agreedPrice: 200,
+      currency: 'USDC',
+      settlement: 'escrow',
+      escrow: { contractAddress: '0x1234' },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  test('valid FULFIL message', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'fulfil',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      summary: 'Done',
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  test('valid ACCEPT message', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'accept',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      rating: 5,
+      feedback: 'Great work!',
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  test('rejects ACCEPT with invalid rating', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'accept',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      rating: 10,
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  test('valid DISPUTE message', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'dispute',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      reason: 'Work was not delivered',
+      resolution: 'refund',
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  test('rejects DISPUTE with missing reason', () => {
+    const result = validateMessage({
+      bcp_version: '0.3',
+      type: 'dispute',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  test('validateMessageType validates known type', () => {
+    const result = validateMessageType('intent', {
+      bcp_version: '0.3',
+      type: 'intent',
+      sessionId: 'sess-1',
+      timestamp: new Date().toISOString(),
+      service: 'Logo design',
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  test('all 7 message types validate', () => {
+    const messages = [
+      { bcp_version: '0.3', type: 'intent', sessionId: 's', timestamp: new Date().toISOString(), service: 'x' },
+      { bcp_version: '0.3', type: 'quote', sessionId: 's', timestamp: new Date().toISOString(), price: 1, currency: 'USD' },
+      { bcp_version: '0.3', type: 'counter', sessionId: 's', timestamp: new Date().toISOString(), counterPrice: 1 },
+      { bcp_version: '0.3', type: 'commit', sessionId: 's', timestamp: new Date().toISOString(), agreedPrice: 1, currency: 'USD' },
+      { bcp_version: '0.3', type: 'fulfil', sessionId: 's', timestamp: new Date().toISOString() },
+      { bcp_version: '0.3', type: 'accept', sessionId: 's', timestamp: new Date().toISOString() },
+      { bcp_version: '0.3', type: 'dispute', sessionId: 's', timestamp: new Date().toISOString(), reason: 'r' },
+    ];
+    for (const msg of messages) {
+      const result = validateMessage(msg);
+      expect(result.valid).toBe(true);
+    }
   });
 });
